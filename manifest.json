@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Bilibili Comment Exporter",
+  "version": "1.0.0",
+  "description": "Export all Bilibili comments (including nested replies) to JSON from a popup.",
+  "minimum_chrome_version": "108",
+  "action": {
+    "default_title": "Export Bilibili Comments",
+    "default_popup": "popup.html"
+  },
+  "permissions": ["downloads", "storage"],
+  "host_permissions": [
+    "https://api.bilibili.com/*",
+    "https://www.bilibili.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
+
