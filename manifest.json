@@ -9,7 +9,7 @@
     "default_popup": "popup.html"
   },
   "options_page": "options.html",
-  "permissions": ["activeTab", "downloads", "storage"],
+  "permissions": ["downloads", "storage"],
   "host_permissions": [
     "https://api.bilibili.com/*",
     "https://www.bilibili.com/*"
