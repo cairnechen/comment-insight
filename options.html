@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Bilibili 评论导出 - 设置</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>⚙️ Gemini AI 总结配置</h1>
+        <p class="desc">配置Gemini API以启用评论AI总结功能</p>
+      </header>
+
+      <div class="section">
+        <h2>API 配置</h2>
+        <div class="config-row">
+          <label>API地址</label>
+          <input type="text" id="apiEndpoint" placeholder="https://generativelanguage.googleapis.com/v1beta/models/" />
+          <div class="hint">Gemini API的基础地址</div>
+        </div>
+
+        <div class="config-row">
+          <label>API Key</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="password" id="apiKey" placeholder="AIzaSy..." style="flex: 1;" />
+            <button class="icon-btn" id="toggleApiKey" title="显示/隐藏">👁️</button>
+          </div>
+          <div class="hint">在 <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a> 获取API Key</div>
+        </div>
+
+        <div class="config-row">
+          <label>模型名称</label>
+          <select id="modelName">
+            <option value="gemini-2.5-flash">gemini-2.5-flash (推荐)</option>
+            <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
+            <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+          </select>
+        </div>
+
+        <div class="config-row">
+          <label>Temperature <span id="temperatureValue">0.7</span></label>
+          <input type="range" id="temperature" min="0" max="1" step="0.1" value="0.7" />
+          <div class="hint">控制输出的随机性，0为最确定，1为最随机</div>
+        </div>
+
+        <div class="action-row">
+          <button class="btn primary" id="saveConfigBtn">💾 保存配置</button>
+          <button class="btn secondary" id="testApiBtn">🔍 测试连接</button>
+        </div>
+
+        <div id="testResult" class="result" style="display: none;"></div>
+      </div>
+
+      <div class="section">
+        <h2>提示词配置</h2>
+        <div class="config-row">
+          <label>预设模板</label>
+          <select id="promptTemplate">
+            <option value="summary">评论要点总结</option>
+            <option value="sentiment">用户情感分析</option>
+            <option value="topics">热门话题提取</option>
+            <option value="controversy">争议观点汇总</option>
+            <option value="custom">自定义...</option>
+          </select>
+        </div>
+
+        <div class="config-row">
+          <label>提示词内容</label>
+          <textarea id="promptText" rows="12" placeholder="输入提示词..."></textarea>
+        </div>
+
+        <button class="btn primary" id="savePromptBtn">💾 保存提示词</button>
+      </div>
+
+      <div class="section">
+        <h2>使用说明</h2>
+        <ul class="help-list">
+          <li>在Bilibili视频页面点击扩展图标，先导出评论</li>
+          <li>导出完成后，点击"AI总结"按钮即可调用Gemini进行分析</li>
+          <li>评论数据会缓存在本地，无需重复导出</li>
+          <li>自定义提示词时，评论数据格式为JSON，包含rpid、uname、message、children等字段</li>
+        </ul>
+      </div>
+    </div>
+
+    <script src="options.js"></script>
+  </body>
+</html>

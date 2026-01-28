@@ -8,7 +8,8 @@
     "default_title": "Export Bilibili Comments",
     "default_popup": "popup.html"
   },
-  "permissions": ["downloads", "storage"],
+  "options_page": "options.html",
+  "permissions": ["activeTab", "downloads", "storage"],
   "host_permissions": [
     "https://api.bilibili.com/*",
     "https://www.bilibili.com/*"

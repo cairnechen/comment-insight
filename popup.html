@@ -74,6 +74,26 @@
       }
       input[type="checkbox"] { transform: scale(1.1); }
       .small { font-size: 12px; color: var(--muted); }
+
+      .cache-notice {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 12px 0;
+        padding: 12px;
+        background: rgba(34, 197, 94, 0.1);
+        border: 1px solid rgba(34, 197, 94, 0.3);
+        border-radius: 12px;
+      }
+      .cache-icon { font-size: 24px; }
+      .cache-content { flex: 1; }
+      .cache-title { font-size: 13px; font-weight: 600; color: #22c55e; margin-bottom: 4px; }
+      .cache-info { font-size: 12px; color: var(--muted); line-height: 1.4; }
+
+      .btn-secondary {
+        background: linear-gradient(135deg, rgba(34,197,94,1), rgba(22,163,74,1));
+        margin-top: 8px;
+      }
     </style>
   </head>
   <body>
@@ -91,18 +111,21 @@
           <div class="status" id="status">打开 B 站视频页（URL 含 /video/BV...）后再导出。</div>
         </div>
 
-        <div class="opts">
-          <input id="gzip" type="checkbox" />
-          <div>
-            <div style="font-size:13px; font-weight:600;">压缩导出（gzip）</div>
-            <div class="small">生成 .json.gz，体积更小，更不容易触发下载限制</div>
+        <!-- 缓存提示区域 -->
+        <div class="cache-notice" id="cacheNotice" style="display: none;">
+          <div class="cache-icon">💾</div>
+          <div class="cache-content">
+            <div class="cache-title">已有缓存数据</div>
+            <div class="cache-info" id="cacheInfo">--</div>
           </div>
         </div>
 
         <button class="btn" id="exportBtn" disabled>一键导出</button>
+        <button class="btn btn-secondary" id="viewResultsBtn" style="display: none;">查看已缓存结果</button>
 
         <div class="hint">
-          说明：导出包含 <b>评论内容 / 用户名 / 头像 / 楼中楼层级 / 发布时间 / IP 属地</b>。
+          说明：导出包含 <b>评论内容 / 用户名 / 楼中楼层级 / 发布时间 / IP 属地</b>。
+          <br>导出完成后将打开新标签页，提供下载和AI总结选项。
         </div>
       </div>
     </div>

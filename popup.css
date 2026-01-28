@@ -48,3 +48,41 @@ button:disabled { background: #2a3245; cursor: not-allowed; color: #cbd2e1; }
   color: var(--muted);
   line-height: 1.5;
 }
+
+/* AI总结区域 */
+.ai-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.settings-link {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 18px;
+  transition: color 0.2s;
+}
+.settings-link:hover {
+  color: var(--text);
+}
+
+.btn.ai-btn {
+  background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+}
+.btn.ai-btn:hover {
+  background: linear-gradient(135deg, #7c3aed, #5b21b6);
+}
+.btn.ai-btn:disabled {
+  background: rgba(139,92,246,.3);
+}
+
+.cache-info {
+  padding: 8px 10px;
+  background: rgba(139,92,246,.15);
+  border: 1px solid rgba(139,92,246,.3);
+  border-radius: 10px;
+  font-size: 12px;
+  color: #c4b5fd;
+  line-height: 1.4;
+}

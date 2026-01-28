@@ -54,26 +54,27 @@ No automated tests are present. Manual testing requires:
 - Sub-replies: traditional page number pagination (pn/ps parameters); probes first to get total count
 
 **Data Structure**
-Each comment node contains:
+Each comment node contains (simplified to only essential fields):
 - `rpid`: reply ID (unique identifier)
 - `mid`: user member ID
 - `uname`: username
-- `avatar`: avatar URL
 - `message`: comment text content
 - `like`: like count
 - `ctime`: unix timestamp (seconds)
-- `time_desc`: human-readable time (e.g., "142天前发布")
 - `location`: IP location string (e.g., "IP属地：北京")
 - `root`: root comment rpid (0 for main comments)
 - `parent`: parent comment rpid
-- `children[]`: nested array of child replies
+- `dialog`: dialog ID for conversation tracking (0 if not part of a dialog)
+- `replies[]`: nested array of child replies (null if no replies, matching Bilibili API behavior)
+
+Note: Fields like `avatar`, `time_desc`, and all `*_str` variants are intentionally excluded to reduce file size and focus on AI analysis needs.
 
 **Tree Building Algorithm**
-- Sub-replies are fetched flat from API (each has `root` and `parent` fields)
+- Sub-replies are fetched flat from API (each has `root`, `parent`, and `dialog` fields)
 - `buildNestedChildren()` constructs a proper tree by:
   1. Creating a Map of rpid → node
   2. Linking each node to its parent based on the `parent` field
-  3. Nodes with `parent === mainRpid` become direct children
+  3. Nodes with `parent === mainRpid` become direct children in the `replies` array
   4. Recursively sorting by `ctime` ascending
 
 **Download Mechanism**

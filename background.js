@@ -6,8 +6,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === "EXPORT") {
     (async () => {
       try {
-        const { bvid, gzip } = msg;
-        await exportAllComments({ bvid, gzip: !!gzip });
+        const { bvid } = msg;
+        await exportAllComments({ bvid });
         sendResponse({ ok: true });
       } catch (err) {
         chrome.runtime.sendMessage({
@@ -19,6 +19,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     })();
     return true; // keep channel open for async
   }
+
 });
 
 // -----------------------
@@ -42,11 +43,6 @@ function parseAidFromViewApi(respJson) {
 function pickLocation(reply) {
   // e.g. "IP属地：北京"
   return reply?.reply_control?.location || "";
-}
-
-function pickTimeDesc(reply) {
-  // e.g. "142天前发布" (not the unix time)
-  return reply?.reply_control?.time_desc || "";
 }
 
 // -----------------------
@@ -329,15 +325,14 @@ function shapeReplyNode(reply) {
     rpid: Number(reply?.rpid),
     mid: Number(reply?.mid),
     uname: reply?.member?.uname || "",
-    avatar: reply?.member?.avatar || "",
     message: reply?.content?.message || "",
     like: Number(reply?.like || 0),
-    ctime: Number(reply?.ctime || 0), // unix seconds
-    time_desc: pickTimeDesc(reply),
-    location: pickLocation(reply), // "IP属地：..."
+    ctime: Number(reply?.ctime || 0),
+    location: pickLocation(reply),
     root: Number(reply?.root || 0),
     parent: Number(reply?.parent || 0),
-    children: [],
+    dialog: Number(reply?.dialog || 0),
+    replies: [],
   };
 }
 
@@ -360,18 +355,34 @@ function buildNestedChildren(mainRpid, subReplies) {
       continue;
     }
     const p = map.get(node.parent);
-    if (p) p.children.push(node);
+    if (p) p.replies.push(node);
     else roots.push(node); // fallback (in case parent not in current set)
   }
 
-  // sort children by ctime ascending (like bilibili default)
+  // sort replies by ctime ascending (like bilibili default)
   function sortRec(list) {
     list.sort((a, b) => a.ctime - b.ctime);
-    for (const it of list) sortRec(it.children);
+    for (const it of list) sortRec(it.replies);
   }
   sortRec(roots);
 
   return roots;
+}
+
+function normalizeReplies(comments) {
+  // 将空的 replies 数组转换为 null，与 Bilibili API 保持一致
+  function processNode(node) {
+    if (node.replies && Array.isArray(node.replies)) {
+      if (node.replies.length === 0) {
+        node.replies = null;
+      } else {
+        node.replies.forEach(processNode);
+      }
+    }
+    return node;
+  }
+
+  return comments.map(processNode);
 }
 
 // -----------------------
@@ -427,7 +438,7 @@ async function downloadTextAsJson({ text, filename }) {
 // Main export flow
 // -----------------------
 
-async function exportAllComments({ bvid, gzip }) {
+async function exportAllComments({ bvid }) {
   const oid = await fetchOidByBvid(bvid);
   const type = 1;
   const mode = 2;
@@ -507,7 +518,7 @@ async function exportAllComments({ bvid, gzip }) {
 
   const enriched = [];
   for (let i = 0; i < mainItems.length; i++) {
-    enriched.push({ ...mainItems[i], children: [] });
+    enriched.push({ ...mainItems[i], replies: [] });
   }
   // update map
   mainIndexByRpid.clear();
@@ -551,8 +562,11 @@ async function exportAllComments({ bvid, gzip }) {
     }
 
     // build nested structure
-    main.children = buildNestedChildren(main.rpid, allSubRaw);
+    main.replies = buildNestedChildren(main.rpid, allSubRaw);
   }
+
+  // 将空的 replies 数组转换为 null
+  normalizeReplies(enriched);
 
   // final output
   const out = {
@@ -574,35 +588,64 @@ async function exportAllComments({ bvid, gzip }) {
 
   const jsonText = JSON.stringify(out, null, 2);
 
-  // download
-  const safeName = `comments_${bvid}_${gzip ? "gzip" : "plain"}`;
-  if (gzip) {
-    sendProgress("压缩中（gzip）…");
-    const gzBytes = await gzipBytesFromString(jsonText);
-    const filename = `${safeName}.json.gz`;
-    await downloadBytes({ bytes: gzBytes, filename, mime: "application/gzip" });
+  // 保存评论数据到chrome.storage.local
+  sendProgress("正在保存数据…");
+  try {
+    // 准备简化的评论数据（只保留AI需要的字段，减小存储大小）
+    const simplifiedComments = prepareCommentsForAI(enriched);
 
+    // 保存到storage，包含元数据和完整JSON
+    await chrome.storage.local.set({
+      lastExportedComments: simplifiedComments,
+      lastExportedJson: jsonText,
+      lastExportBvid: bvid,
+      lastExportTime: new Date().toISOString(),
+      lastExportCount: enriched.length,
+      lastExportMeta: out.meta
+    });
+
+    // 发送完成消息到popup
     chrome.runtime.sendMessage({
       type: "DONE",
-      filename,
       main_total: out.meta.main_total,
       sub_total_fetched: out.meta.sub_total_fetched,
       all_total_fetched: out.meta.all_total_fetched,
     });
-  } else {
-    const filename = `${safeName}.json`;
-    // 大文件 data URL 可能有风险：建议用户用 gzip
-    if (jsonText.length > 8_000_000) {
-      sendProgress("⚠️ 文件较大，未压缩下载可能失败；建议勾选 gzip 再导出。\n继续尝试下载中…");
-    }
-    await downloadTextAsJson({ text: jsonText, filename });
+
+    // 打开结果页面
+    await chrome.tabs.create({
+      url: chrome.runtime.getURL("results.html"),
+      active: true
+    });
+  } catch (err) {
+    // 如果存储失败（可能是数据太大），仍然尝试打开结果页面
+    console.error("保存评论数据到storage失败:", err);
 
     chrome.runtime.sendMessage({
-      type: "DONE",
-      filename,
-      main_total: out.meta.main_total,
-      sub_total_fetched: out.meta.sub_total_fetched,
-      all_total_fetched: out.meta.all_total_fetched,
+      type: "ERROR",
+      error: `数据保存失败：${err?.message || String(err)}。数据可能过大，请尝试导出较少评论的视频。`
     });
   }
+}
+
+// 准备评论数据：只保留AI分析需要的字段
+function prepareCommentsForAI(comments) {
+  function simplifyNode(node) {
+    const replies = node.replies;
+    return {
+      rpid: node.rpid,
+      mid: node.mid,
+      uname: node.uname,
+      message: node.message,
+      like: node.like,
+      ctime: node.ctime,
+      location: node.location,
+      root: node.root,
+      parent: node.parent,
+      dialog: node.dialog,
+      replies: replies && replies.length > 0 ? replies.map(simplifyNode) : null
+    };
+  }
+
+  return comments.map(simplifyNode);
 }

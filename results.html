@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>评论导出完成 - Bilibili Comment Exporter</title>
+    <link rel="stylesheet" href="results.css" />
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>✅ 评论导出完成</h1>
+        <p class="subtitle">数据已准备就绪，请选择后续操作</p>
+      </div>
+
+      <div class="card info-card">
+        <h2>📊 导出信息</h2>
+        <div class="info-grid">
+          <div class="info-row">
+            <span class="label">视频 BVID</span>
+            <span class="value mono" id="bvid">--</span>
+          </div>
+          <div class="info-row">
+            <span class="label">主评论数</span>
+            <span class="value" id="mainCount">--</span>
+          </div>
+          <div class="info-row">
+            <span class="label">子评论数</span>
+            <span class="value" id="subCount">--</span>
+          </div>
+          <div class="info-row">
+            <span class="label">总评论数</span>
+            <span class="value highlight" id="totalCount">--</span>
+          </div>
+          <div class="info-row">
+            <span class="label">数据大小</span>
+            <span class="value" id="dataSize">--</span>
+          </div>
+          <div class="info-row">
+            <span class="label">导出时间</span>
+            <span class="value" id="exportTime">--</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card actions-card">
+        <h2>🎯 选择操作</h2>
+
+        <div class="action-group">
+          <h3>💾 下载文件</h3>
+          <p class="hint">将评论数据保存到本地</p>
+          <div class="button-row">
+            <button class="btn btn-primary" id="downloadJsonBtn">
+              <span class="icon">📄</span>
+              <span class="text">下载 JSON</span>
+            </button>
+            <button class="btn btn-primary" id="downloadGzipBtn">
+              <span class="icon">📦</span>
+              <span class="text">下载 Gzip（推荐）</span>
+            </button>
+          </div>
+          <p class="hint-small">Gzip 格式体积更小，适合大文件</p>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="action-group">
+          <h3>🤖 AI 分析</h3>
+          <p class="hint">使用 Gemini AI 对评论进行智能总结</p>
+          <button class="btn btn-ai" id="aiSummaryBtn">
+            <span class="icon">✨</span>
+            <span class="text">AI 总结评论</span>
+          </button>
+          <p class="hint-small" id="aiConfigHint">需要先在<a href="#" id="openSettings">设置页面</a>配置 Gemini API</p>
+        </div>
+      </div>
+
+      <div class="card status-card" id="statusCard" style="display: none;">
+        <div class="status-content">
+          <div class="status-icon" id="statusIcon">⏳</div>
+          <div class="status-text" id="statusText">处理中...</div>
+        </div>
+      </div>
+    </div>
+
+    <script src="results.js"></script>
+  </body>
+</html>
