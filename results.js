@@ -64,19 +64,9 @@ async function gzipBytesFromString(str) {
   return new Uint8Array(ab);
 }
 
-function uint8ToBase64(u8) {
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let i = 0; i < u8.length; i += chunkSize) {
-    const chunk = u8.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-  return btoa(binary);
-}
-
 function downloadFile({ bytes, filename, mime }) {
-  const base64 = uint8ToBase64(bytes);
-  const url = `data:${mime};base64,${base64}`;
+  const blob = new Blob([bytes], { type: mime });
+  const url = URL.createObjectURL(blob);
 
   const a = document.createElement("a");
   a.href = url;
@@ -85,6 +75,9 @@ function downloadFile({ bytes, filename, mime }) {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+
+  // Release the blob URL to free memory
+  URL.revokeObjectURL(url);
 }
 
 function downloadTextAsJson({ text, filename }) {
