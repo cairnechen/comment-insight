@@ -60,8 +60,8 @@ function showCacheInfo(cacheData) {
   const totalCount = cacheData.meta?.all_total_fetched || cacheData.count;
 
   $cacheInfo.textContent = `${totalCount.toLocaleString()} 条评论 | ${timeStr}`;
-  $cacheNotice.style.display = "flex";
-  $viewResultsBtn.style.display = "block";
+  $cacheNotice.classList.add("visible");
+  $viewResultsBtn.classList.add("visible");
   $btn.textContent = "重新导出";
 }
 
