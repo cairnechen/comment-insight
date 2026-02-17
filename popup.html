@@ -275,6 +275,21 @@
         transform: none;
       }
 
+      .btn-stop {
+        background: rgba(239, 68, 68, 0.15);
+        color: #ef4444;
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        margin-top: 10px;
+        animation: fadeInUp 0.4s ease-out 0.35s both;
+      }
+
+      .btn-stop:hover {
+        background: rgba(239, 68, 68, 0.25);
+        border-color: rgba(239, 68, 68, 0.5);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 16px rgba(239, 68, 68, 0.2);
+      }
+
       .btn-secondary {
         background: rgba(0, 161, 214, 0.15);
         color: var(--bilibili-blue);
@@ -353,6 +368,7 @@
 
       <!-- 操作按钮 -->
       <button class="btn btn-primary" id="exportBtn" disabled>一键导出</button>
+      <button class="btn btn-stop" id="stopBtn" style="display: none;">停止导出</button>
       <button class="btn btn-secondary" id="viewResultsBtn">查看已缓存结果</button>
 
       <!-- 说明提示 -->

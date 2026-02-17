@@ -2,8 +2,12 @@
 // MV3 Service Worker
 // =======================
 
+// 全局停止标志
+let shouldStop = false;
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === "EXPORT") {
+    shouldStop = false; // 重置停止标志
     (async () => {
       try {
         const { bvid } = msg;
@@ -20,6 +24,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true; // keep channel open for async
   }
 
+  if (msg?.type === "STOP_EXPORT") {
+    shouldStop = true;
+    sendProgress("❌ 用户手动停止导出");
+    sendResponse({ ok: true });
+    return true;
+  }
+
 });
 
 // -----------------------
@@ -27,6 +38,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // -----------------------
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// 随机延迟，增加 ±30% 的随机波动
+function randomSleep(baseMs) {
+  const variance = 0.3;
+  const min = baseMs * (1 - variance);
+  const max = baseMs * (1 + variance);
+  const ms = min + Math.random() * (max - min);
+  return sleep(Math.round(ms));
+}
 
 function sendProgress(text) {
   chrome.runtime.sendMessage({ type: "PROGRESS", text });
@@ -262,8 +282,10 @@ async function fetchJson(url) {
     credentials: "include",
     headers: {
       "accept": "application/json, text/plain, */*",
+      "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
       "referer": "https://www.bilibili.com/",
       "origin": "https://www.bilibili.com",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     },
   });
   const json = await res.json();
@@ -442,8 +464,10 @@ async function exportAllComments({ bvid }) {
   const oid = await fetchOidByBvid(bvid);
   const type = 1;
   const mode = 2;
-  const sleepMs = 300;
+  const sleepMs = 400; // 400ms 延迟（实际 280-520ms 随机）
   const subPageSize = 20;
+  const maxConsecutiveFailures = 3; // 连续失败 3 次后自动停止
+  let consecutiveFailures = 0; // 连续失败计数器
 
   sendProgress(`aid/oid = ${oid}\n获取 wbi keys…`);
   const mixinKey = await getWbiMixinKey();
@@ -480,7 +504,7 @@ async function exportAllComments({ bvid }) {
       `[main] page=${page} got=${replies.length} main_total=${mainItems.length} offset=${offset ? JSON.stringify(offset) : "∅"} is_end=${isEnd}`
     );
 
-    await sleep(sleepMs);
+    await randomSleep(sleepMs);
 
     if (page > 5000) throw new Error("主评论翻页异常：page 超限（防死循环）");
   }
@@ -525,6 +549,11 @@ async function exportAllComments({ bvid }) {
   for (const node of enriched) mainIndexByRpid.set(node.rpid, node);
 
   for (let i = 0; i < enriched.length; i++) {
+    // 检查是否手动停止
+    if (shouldStop) {
+      throw new Error("导出已被用户手动停止");
+    }
+
     const main = enriched[i];
 
     // probe: ps=1, pn=1 to get total sub count
@@ -532,15 +561,23 @@ async function exportAllComments({ bvid }) {
     try {
       const probe = await fetchSubPage({ oid, type, root: main.rpid, ps: 1, pn: 1 });
       subCount = Number(probe?.data?.page?.count || 0);
+      consecutiveFailures = 0; // 成功时重置计数器
     } catch (e) {
       // If a particular root fails, skip it rather than failing all.
-      sendProgress(`⚠️ 子评论探测失败 root=${main.rpid}: ${e?.message || String(e)}`);
-      await sleep(sleepMs);
+      consecutiveFailures++;
+      sendProgress(`⚠️ 子评论探测失败 (${consecutiveFailures}/${maxConsecutiveFailures}) root=${main.rpid}: ${e?.message || String(e)}`);
+
+      // 连续失败次数过多，自动停止
+      if (consecutiveFailures >= maxConsecutiveFailures) {
+        throw new Error(`连续失败 ${consecutiveFailures} 次，疑似触发反爬虫机制，已自动停止。建议等待 10-30 分钟后重试。`);
+      }
+
+      await randomSleep(sleepMs);
       continue;
     }
 
     if (subCount <= 0) {
-      await sleep(sleepMs);
+      await randomSleep(sleepMs);
       continue;
     }
 
@@ -557,7 +594,7 @@ async function exportAllComments({ bvid }) {
       );
 
       subTotalFetched += subReplies.length;
-      await sleep(sleepMs);
+      await randomSleep(sleepMs);
       if (pn > 5000) throw new Error(`子评论翻页异常 root=${main.rpid}：pn 超限（防死循环）`);
     }
 

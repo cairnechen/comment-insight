@@ -1,6 +1,7 @@
 const $bvid = document.getElementById("bvid");
 const $status = document.getElementById("status");
 const $btn = document.getElementById("exportBtn");
+const $stopBtn = document.getElementById("stopBtn");
 const $viewResultsBtn = document.getElementById("viewResultsBtn");
 const $cacheNotice = document.getElementById("cacheNotice");
 const $cacheInfo = document.getElementById("cacheInfo");
@@ -110,6 +111,17 @@ async function init() {
     });
   });
 
+  // 停止按钮
+  $stopBtn.addEventListener("click", async () => {
+    try {
+      await chrome.runtime.sendMessage({ type: "STOP_EXPORT" });
+      $stopBtn.disabled = true;
+      setStatus("正在停止…");
+    } catch (e) {
+      console.error("停止失败:", e);
+    }
+  });
+
   // 导出按钮
   $btn.addEventListener("click", async () => {
     // 如果有缓存，确认是否要重新导出
@@ -122,6 +134,8 @@ async function init() {
     }
 
     $btn.disabled = true;
+    $stopBtn.style.display = "block"; // 显示停止按钮
+    $stopBtn.disabled = false;
     setStatus("开始导出…");
 
     try {
@@ -132,6 +146,7 @@ async function init() {
     } catch (e) {
       setStatus(`失败：${e?.message || String(e)}`, "err");
       $btn.disabled = false;
+      $stopBtn.style.display = "none"; // 隐藏停止按钮
     }
   });
 }
@@ -147,6 +162,7 @@ chrome.runtime.onMessage.addListener(async (msg) => {
   if (msg.type === "DONE") {
     setStatus(`完成 ✅\n总评论：${msg.all_total_fetched}（主 ${msg.main_total} + 子 ${msg.sub_total_fetched}）\n正在打开结果页面…`, "ok");
     $btn.disabled = false;
+    $stopBtn.style.display = "none"; // 隐藏停止按钮
 
     // 重新检查缓存并更新UI
     const tab = await getActiveTab();
@@ -165,6 +181,7 @@ chrome.runtime.onMessage.addListener(async (msg) => {
   if (msg.type === "ERROR") {
     setStatus(`失败：${msg.error}`, "err");
     $btn.disabled = false;
+    $stopBtn.style.display = "none"; // 隐藏停止按钮
     return;
   }
 });
