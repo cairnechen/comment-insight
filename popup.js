@@ -49,6 +49,15 @@ async function checkCache(bvid) {
   });
 }
 
+// 检查是否有任何缓存（不限制 bvid），用于控制清除缓存按钮显示
+async function checkAnyCache() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ lastExportTime: null }, (res) => {
+      resolve(!!res.lastExportTime);
+    });
+  });
+}
+
 // 显示缓存信息
 function showCacheInfo(cacheData) {
   const timeStr = new Date(cacheData.time).toLocaleString('zh-CN', {
@@ -104,13 +113,18 @@ async function init() {
     setStatus("导出进行中...");
   }
 
-  // 检查是否有缓存
+  // 检查当前视频是否有缓存（控制缓存提示和重新导出按钮）
   const cacheData = await checkCache(bvid);
   if (cacheData.hasCache) {
     showCacheInfo(cacheData);
     setStatus("检测到缓存数据。可以查看已有结果或重新导出。");
   } else {
     setStatus("就绪。点击【一键导出】开始抓取。");
+  }
+
+  // 检查是否有任何缓存（控制扫帚图标显示）
+  if (await checkAnyCache()) {
+    $clearCacheBtn.style.display = "block";
   }
 
   $btn.disabled = false;
@@ -159,7 +173,7 @@ async function init() {
   $btn.addEventListener("click", async () => {
     // 如果有缓存，确认是否要重新导出
     const cacheData = await checkCache(bvid);
-    if (cacheData.hasCache && $btn.textContent === "重新导出") {
+    if (cacheData.hasCache) {
       const confirmed = confirm("检测到已有缓存数据，确定要重新导出吗？\n\n重新导出将覆盖现有缓存。");
       if (!confirmed) {
         return;
@@ -219,9 +233,9 @@ chrome.runtime.onMessage.addListener(async (msg) => {
 
     // 立即检查缓存并更新UI（不需要延迟，因为 DONE 消息时缓存已保存）
     const tab = await getActiveTab();
-    const bvid = parseBvidFromUrl(tab?.url);
-    if (bvid) {
-      const cacheData = await checkCache(bvid);
+    const currentBvid = parseBvidFromUrl(tab?.url);
+    if (currentBvid) {
+      const cacheData = await checkCache(currentBvid);
       if (cacheData.hasCache) {
         showCacheInfo(cacheData);
       }

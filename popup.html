@@ -89,14 +89,6 @@
         margin-bottom: 20px;
       }
 
-      .title-row {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 12px;
-        margin-bottom: 6px;
-      }
-
       .title {
         font-family: 'Noto Serif SC', serif;
         font-size: 22px;
@@ -116,26 +108,27 @@
 
       /* 图标按钮 */
       .icon-btn {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 8px;
-        padding: 6px 8px;
-        font-size: 16px;
+        position: absolute;
+        top: 0;
+        right: 0;
+        background: transparent;
+        border: none;
+        padding: 2px 4px;
+        font-size: 13px;
         cursor: pointer;
-        transition: all 0.3s ease;
+        transition: all 0.2s ease;
         display: none;
-        opacity: 0.6;
+        opacity: 0.4;
+        line-height: 1;
       }
 
       .icon-btn:hover {
-        background: rgba(255, 107, 107, 0.15);
-        border-color: rgba(255, 107, 107, 0.3);
-        opacity: 1;
-        transform: scale(1.1);
+        opacity: 0.9;
+        transform: scale(1.15);
       }
 
       .icon-btn:active {
-        transform: scale(0.95);
+        transform: scale(0.9);
       }
 
       /* 玻璃态卡片 */
@@ -403,11 +396,9 @@
   <body>
     <div class="container">
       <!-- 标题区域 -->
-      <div class="header">
-        <div class="title-row">
-          <div class="title">Bilibili 评论导出</div>
-          <button class="icon-btn" id="clearCacheBtn" style="display: none;" title="清除缓存">🗑️</button>
-        </div>
+      <div class="header" style="position: relative;">
+        <button class="icon-btn" id="clearCacheBtn" style="display: none;" title="清除缓存">🧹</button>
+        <div class="title">Bilibili 评论导出</div>
         <div class="subtitle">Comment Exporter</div>
       </div>
 
