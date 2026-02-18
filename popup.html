@@ -275,19 +275,52 @@
         transform: none;
       }
 
+      /* 停止按钮 - 优雅的警示设计 */
       .btn-stop {
-        background: rgba(239, 68, 68, 0.15);
-        color: #ef4444;
-        border: 1px solid rgba(239, 68, 68, 0.3);
+        background: linear-gradient(135deg, rgba(255, 107, 107, 0.12) 0%, rgba(239, 68, 68, 0.15) 100%);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        color: #ff6b6b;
+        border: 1px solid rgba(255, 107, 107, 0.25);
         margin-top: 10px;
+        box-shadow: 0 0 20px rgba(255, 107, 107, 0.08),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.1);
         animation: fadeInUp 0.4s ease-out 0.35s both;
+        position: relative;
+        overflow: hidden;
       }
 
+      /* 停止按钮内部光晕 */
+      .btn-stop::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+        transition: left 0.5s ease;
+      }
+
+      .btn-stop:hover::before {
+        left: 100%;
+      }
+
+      /* 停止按钮悬停效果 */
       .btn-stop:hover {
-        background: rgba(239, 68, 68, 0.25);
-        border-color: rgba(239, 68, 68, 0.5);
+        background: linear-gradient(135deg, rgba(255, 107, 107, 0.18) 0%, rgba(239, 68, 68, 0.22) 100%);
+        border-color: rgba(255, 107, 107, 0.4);
+        color: #ff8787;
         transform: translateY(-2px);
-        box-shadow: 0 4px 16px rgba(239, 68, 68, 0.2);
+        box-shadow: 0 0 30px rgba(255, 107, 107, 0.25),
+                    0 4px 20px rgba(255, 107, 107, 0.15),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+      }
+
+      .btn-stop:active {
+        transform: translateY(0);
+        box-shadow: 0 0 15px rgba(255, 107, 107, 0.15),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.1);
       }
 
       .btn-secondary {

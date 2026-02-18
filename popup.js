@@ -131,10 +131,26 @@ async function init() {
       if (!confirmed) {
         return;
       }
+
+      // 用户确认重新导出，立即清除缓存并更新 UI
+      await chrome.storage.local.remove([
+        'lastExportedComments',
+        'lastExportedJson',
+        'lastExportBvid',
+        'lastExportTime',
+        'lastExportCount',
+        'lastExportMeta'
+      ]);
+
+      // 隐藏缓存提示和查看结果按钮
+      $cacheNotice.classList.remove("visible");
+      $viewResultsBtn.classList.remove("visible");
+      $btn.textContent = "一键导出";
     }
 
-    $btn.disabled = true;
-    $stopBtn.style.display = "block"; // 显示停止按钮
+    // 隐藏导出按钮，显示停止按钮
+    $btn.style.display = "none";
+    $stopBtn.style.display = "block";
     $stopBtn.disabled = false;
     setStatus("开始导出…");
 
@@ -145,8 +161,9 @@ async function init() {
       });
     } catch (e) {
       setStatus(`失败：${e?.message || String(e)}`, "err");
+      $btn.style.display = "block";
       $btn.disabled = false;
-      $stopBtn.style.display = "none"; // 隐藏停止按钮
+      $stopBtn.style.display = "none";
     }
   });
 }
@@ -161,27 +178,29 @@ chrome.runtime.onMessage.addListener(async (msg) => {
 
   if (msg.type === "DONE") {
     setStatus(`完成 ✅\n总评论：${msg.all_total_fetched}（主 ${msg.main_total} + 子 ${msg.sub_total_fetched}）\n正在打开结果页面…`, "ok");
+    // 显示导出按钮，隐藏停止按钮
+    $btn.style.display = "block";
     $btn.disabled = false;
-    $stopBtn.style.display = "none"; // 隐藏停止按钮
+    $stopBtn.style.display = "none";
 
-    // 重新检查缓存并更新UI
+    // 立即检查缓存并更新UI（不需要延迟，因为 DONE 消息时缓存已保存）
     const tab = await getActiveTab();
     const bvid = parseBvidFromUrl(tab?.url);
     if (bvid) {
-      setTimeout(async () => {
-        const cacheData = await checkCache(bvid);
-        if (cacheData.hasCache) {
-          showCacheInfo(cacheData);
-        }
-      }, 1000);
+      const cacheData = await checkCache(bvid);
+      if (cacheData.hasCache) {
+        showCacheInfo(cacheData);
+      }
     }
     return;
   }
 
   if (msg.type === "ERROR") {
     setStatus(`失败：${msg.error}`, "err");
+    // 显示导出按钮，隐藏停止按钮
+    $btn.style.display = "block";
     $btn.disabled = false;
-    $stopBtn.style.display = "none"; // 隐藏停止按钮
+    $stopBtn.style.display = "none";
     return;
   }
 });

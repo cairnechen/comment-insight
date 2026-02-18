@@ -25,8 +25,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg?.type === "STOP_EXPORT") {
-    shouldStop = true;
-    sendProgress("❌ 用户手动停止导出");
+    sendProgress("❌ 用户手动停止导出"); // 先发送停止消息
+    shouldStop = true; // 再设置标志，阻止后续 PROGRESS 消息
     sendResponse({ ok: true });
     return true;
   }
@@ -49,6 +49,7 @@ function randomSleep(baseMs) {
 }
 
 function sendProgress(text) {
+  if (shouldStop) return; // 已停止，不再发送后续进度消息
   chrome.runtime.sendMessage({ type: "PROGRESS", text });
 }
 
@@ -461,6 +462,8 @@ async function downloadTextAsJson({ text, filename }) {
 // -----------------------
 
 async function exportAllComments({ bvid }) {
+  const startTime = Date.now(); // 记录开始时间
+
   const oid = await fetchOidByBvid(bvid);
   const type = 1;
   const mode = 2;
@@ -501,7 +504,7 @@ async function exportAllComments({ bvid }) {
     isEnd = !!cursor?.is_end;
 
     sendProgress(
-      `[main] page=${page} got=${replies.length} main_total=${mainItems.length} offset=${offset ? JSON.stringify(offset) : "∅"} is_end=${isEnd}`
+      `正在获取评论... 已获取 ${mainItems.length} 条（第 ${page} 页）`
     );
 
     await randomSleep(sleepMs);
@@ -510,7 +513,7 @@ async function exportAllComments({ bvid }) {
   }
 
   // Fetch sub replies for roots that have rcount > 0
-  sendProgress(`主评论抓取完成：${mainItems.length}\n开始抓取楼中楼…`);
+  sendProgress(`评论抓取完成: ${mainItems.length} 条\n开始抓取回复...`);
 
   let subTotalFetched = 0;
 
@@ -590,7 +593,7 @@ async function exportAllComments({ bvid }) {
       allSubRaw.push(...subReplies);
 
       sendProgress(
-        `[sub] root=${main.rpid} pn=${pn}/${pages} got=${subReplies.length} sub_total=${subTotalFetched + subReplies.length}`
+        `正在获取回复... 已获取 ${subTotalFetched + subReplies.length} 条`
       );
 
       subTotalFetched += subReplies.length;
@@ -625,6 +628,10 @@ async function exportAllComments({ bvid }) {
 
   const jsonText = JSON.stringify(out, null, 2);
 
+  // 计算导出耗时
+  const endTime = Date.now();
+  const durationMs = endTime - startTime;
+
   // 保存评论数据到chrome.storage.local
   sendProgress("正在保存数据…");
   try {
@@ -638,7 +645,7 @@ async function exportAllComments({ bvid }) {
       lastExportBvid: bvid,
       lastExportTime: new Date().toISOString(),
       lastExportCount: enriched.length,
-      lastExportMeta: out.meta
+      lastExportMeta: { ...out.meta, duration_ms: durationMs } // 添加耗时
     });
 
     // 发送完成消息到popup

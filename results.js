@@ -5,6 +5,7 @@ const $subCount = document.getElementById("subCount");
 const $totalCount = document.getElementById("totalCount");
 const $dataSize = document.getElementById("dataSize");
 const $exportTime = document.getElementById("exportTime");
+const $duration = document.getElementById("duration");
 const $downloadJsonBtn = document.getElementById("downloadJsonBtn");
 const $downloadGzipBtn = document.getElementById("downloadGzipBtn");
 const $aiSummaryBtn = document.getElementById("aiSummaryBtn");
@@ -35,6 +36,25 @@ function formatTime(isoString) {
     minute: "2-digit",
     second: "2-digit"
   });
+}
+
+function formatDuration(ms) {
+  if (!ms || ms < 0) return "--";
+
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+
+  if (hours > 0) {
+    const m = minutes % 60;
+    const s = seconds % 60;
+    return `${hours} 小时 ${m} 分钟 ${s} 秒`;
+  } else if (minutes > 0) {
+    const s = seconds % 60;
+    return `${minutes} 分钟 ${s} 秒`;
+  } else {
+    return `${seconds} 秒`;
+  }
 }
 
 function showStatus(icon, text, type = "normal") {
@@ -319,6 +339,7 @@ function displayData(data) {
   $totalCount.textContent = data.meta?.all_total_fetched?.toLocaleString() || "--";
   $dataSize.textContent = formatBytes(new Blob([data.json]).size);
   $exportTime.textContent = data.time ? formatTime(data.time) : "--";
+  $duration.textContent = formatDuration(data.meta?.duration_ms);
 }
 
 // Event handlers
