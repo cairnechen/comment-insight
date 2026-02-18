@@ -2,12 +2,14 @@
 // MV3 Service Worker
 // =======================
 
-// 全局停止标志
+// 全局停止标志和中止控制器
 let shouldStop = false;
+let abortController = null; // 用于中止正在进行的网络请求
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === "EXPORT") {
     shouldStop = false; // 重置停止标志
+    abortController = new AbortController(); // 创建新的中止控制器
     (async () => {
       try {
         // 设置导出状态为进行中
@@ -20,11 +22,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // 导出失败，重置状态
         await chrome.storage.local.set({ isExporting: false });
 
+        // 如果是用户手动中止，使用更友好的错误消息
+        const errorMsg = err.name === "AbortError"
+          ? "导出已被用户手动停止"
+          : err?.message || String(err);
+
         chrome.runtime.sendMessage({
           type: "ERROR",
-          error: err?.message || String(err),
+          error: errorMsg,
         });
-        sendResponse({ ok: false, error: err?.message || String(err) });
+        sendResponse({ ok: false, error: errorMsg });
       }
     })();
     return true; // keep channel open for async
@@ -33,6 +40,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === "STOP_EXPORT") {
     sendProgress("❌ 用户手动停止导出"); // 先发送停止消息
     shouldStop = true; // 再设置标志，阻止后续 PROGRESS 消息
+    if (abortController) {
+      abortController.abort(); // 中止所有正在进行的网络请求
+    }
     sendResponse({ ok: true });
     return true;
   }
@@ -287,6 +297,7 @@ async function fetchJson(url) {
   const res = await fetch(url, {
     method: "GET",
     credentials: "include",
+    signal: abortController?.signal, // 使用全局中止控制器
     headers: {
       "accept": "application/json, text/plain, */*",
       "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
@@ -473,7 +484,7 @@ async function exportAllComments({ bvid }) {
   const oid = await fetchOidByBvid(bvid);
   const type = 1;
   const mode = 2;
-  const mainSleepMs = 500; // 主评论延迟 500ms（实际 350-650ms 随机）
+  const mainSleepMs = 400; // 主评论延迟 400ms（实际 280-520ms 随机）
   const subSleepMs = 400;  // 子评论延迟 400ms（实际 280-520ms 随机）
   const subPageSize = 20;
   const maxConsecutiveFailures = 3; // 连续失败 3 次后自动停止
@@ -489,6 +500,8 @@ async function exportAllComments({ bvid }) {
 
   const mainItems = []; // shaped main nodes
   const mainIndexByRpid = new Map(); // rpid -> node
+  const rcountMap = new Map(); // rpid -> 直接子回复数（rcount），用于判断是否有子评论
+  const countMap = new Map();  // rpid -> 全部子回复数（count），用于计算分页
   let cursorAllCount = 0;
 
   while (!isEnd) {
@@ -505,6 +518,8 @@ async function exportAllComments({ bvid }) {
       const node = shapeReplyNode(r);
       mainItems.push(node);
       mainIndexByRpid.set(node.rpid, node);
+      rcountMap.set(node.rpid, Number(r?.rcount || 0));
+      countMap.set(node.rpid, Number(r?.count || 0));
     }
 
     offset = cursor?.pagination_reply?.next_offset || "";
@@ -525,96 +540,52 @@ async function exportAllComments({ bvid }) {
     if (page > 5000) throw new Error("主评论翻页异常：page 超限（防死循环）");
   }
 
-  // Fetch sub replies for roots that have rcount > 0
   sendProgress(`评论抓取完成: ${mainItems.length} 条\n开始抓取回复...`);
 
   let subTotalFetched = 0;
-
-  for (let i = 0; i < mainItems.length; i++) {
-    const main = mainItems[i];
-    // bilibili uses rcount as "sub reply count"
-    // In some cases field may be missing; fallback: try reply_control.sub_reply_entry_text? not reliable here.
-    const need = main?.rcount || 0; // we didn't store rcount in shape; so we can check by looking up raw? (not available now)
-    // Workaround: We can detect using main.root==0 and main.parent==0; but count not stored.
-    // Better: fetch only when needed by checking main has "sub replies" is unknown here.
-    // So we do a cheap heuristic: fetch sub pages only if main.count / rcount exists in original.
-    // Since we shaped node, we didn't include rcount. We'll refetch by using known field: not possible.
-    // Solution: just fetch sub replies for all mains? too heavy.
-    // So we reintroduce rcount by storing it during main shaping:
-  }
-
-  // Re-shape mains with rcount (fix: do another pass by re-fetching minimal? too slow).
-  // Instead: we re-run mains once more? Not acceptable.
-  // Therefore: store rcount during initial shape -> implement above by patching shapeReplyNode? easier now:
-  // We'll do a pragmatic fallback: fetch sub replies ONLY when mainItems are likely to have replies:
-  // bilibili returns "reply_control.sub_reply_entry_text" like "共39条回复" in root detail when sub exists,
-  // but root reply in main list usually has reply_control too. We'll store that if present as sub_count.
-  //
-  // Because we already shaped without it, we cannot recover now. So we will do a second pass:
-  // We will fetch sub replies only for roots that are known to have sub replies by calling /reply/reply pn=1 ps=1
-  // and check page.count. That is 1 request per root, acceptable for ~300 roots with sleep.
-  //
-  // Let's do that.
 
   const enriched = [];
   for (let i = 0; i < mainItems.length; i++) {
     enriched.push({ ...mainItems[i], replies: [] });
   }
-  // update map
   mainIndexByRpid.clear();
   for (const node of enriched) mainIndexByRpid.set(node.rpid, node);
 
   for (let i = 0; i < enriched.length; i++) {
-    // 检查是否手动停止
-    if (shouldStop) {
-      throw new Error("导出已被用户手动停止");
-    }
+    if (shouldStop) throw new Error("导出已被用户手动停止");
 
     const main = enriched[i];
 
-    // probe: ps=1, pn=1 to get total sub count
-    let subCount = 0;
-    try {
-      const probe = await fetchSubPage({ oid, type, root: main.rpid, ps: 1, pn: 1 });
-      subCount = Number(probe?.data?.page?.count || 0);
-      consecutiveFailures = 0; // 成功时重置计数器
-    } catch (e) {
-      // If a particular root fails, skip it rather than failing all.
-      consecutiveFailures++;
-      sendProgress(`⚠️ 子评论探测失败 (${consecutiveFailures}/${maxConsecutiveFailures}) root=${main.rpid}: ${e?.message || String(e)}`);
+    // 用主评论 API 返回的 rcount 判断是否有子评论，无则直接跳过（不发请求）
+    if ((rcountMap.get(main.rpid) || 0) <= 0) continue;
 
-      // 连续失败次数过多，自动停止
-      if (consecutiveFailures >= maxConsecutiveFailures) {
-        throw new Error(`连续失败 ${consecutiveFailures} 次，疑似触发反爬虫机制，已自动停止。建议等待 10-30 分钟后重试。`);
-      }
-
-      await randomSleep(subSleepMs); // 子评论探测失败后的延迟
-      continue;
-    }
-
-    if (subCount <= 0) {
-      await randomSleep(subSleepMs); // 无子评论时的延迟
-      continue;
-    }
-
+    // 用 count 计算总页数（包含嵌套层级的全部子回复数）
+    const subCount = countMap.get(main.rpid) || 0;
     const pages = Math.ceil(subCount / subPageSize);
     const allSubRaw = [];
 
     for (let pn = 1; pn <= pages; pn++) {
-      const subJson = await fetchSubPage({ oid, type, root: main.rpid, ps: subPageSize, pn });
-      const subReplies = subJson?.data?.replies || [];
-      allSubRaw.push(...subReplies);
+      if (shouldStop) throw new Error("导出已被用户手动停止");
 
-      sendProgress(
-        `正在获取回复... 已获取 ${subTotalFetched + subReplies.length} 条`
-      );
+      try {
+        const subJson = await fetchSubPage({ oid, type, root: main.rpid, ps: subPageSize, pn });
+        const subReplies = subJson?.data?.replies || [];
+        allSubRaw.push(...subReplies);
+        subTotalFetched += subReplies.length;
+        sendProgress(`正在获取回复... 已获取 ${subTotalFetched} 条`);
+        consecutiveFailures = 0;
+      } catch (e) {
+        consecutiveFailures++;
+        sendProgress(`⚠️ 子评论获取失败 (${consecutiveFailures}/${maxConsecutiveFailures}) root=${main.rpid}: ${e?.message || String(e)}`);
+        if (consecutiveFailures >= maxConsecutiveFailures) {
+          throw new Error(`连续失败 ${consecutiveFailures} 次，疑似触发反爬虫机制，已自动停止。建议等待 10-30 分钟后重试。`);
+        }
+      }
 
-      subTotalFetched += subReplies.length;
-      await randomSleep(subSleepMs); // 子评论翻页延迟
+      await randomSleep(subSleepMs);
       if (pn > 5000) throw new Error(`子评论翻页异常 root=${main.rpid}：pn 超限（防死循环）`);
     }
 
-    // build nested structure
     main.replies = buildNestedChildren(main.rpid, allSubRaw);
   }
 
