@@ -10,10 +10,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     shouldStop = false; // 重置停止标志
     (async () => {
       try {
+        // 设置导出状态为进行中
+        await chrome.storage.local.set({ isExporting: true });
+
         const { bvid } = msg;
         await exportAllComments({ bvid });
         sendResponse({ ok: true });
       } catch (err) {
+        // 导出失败，重置状态
+        await chrome.storage.local.set({ isExporting: false });
+
         chrome.runtime.sendMessage({
           type: "ERROR",
           error: err?.message || String(err),
@@ -467,7 +473,8 @@ async function exportAllComments({ bvid }) {
   const oid = await fetchOidByBvid(bvid);
   const type = 1;
   const mode = 2;
-  const sleepMs = 400; // 400ms 延迟（实际 280-520ms 随机）
+  const mainSleepMs = 500; // 主评论延迟 500ms（实际 350-650ms 随机）
+  const subSleepMs = 400;  // 子评论延迟 400ms（实际 280-520ms 随机）
   const subPageSize = 20;
   const maxConsecutiveFailures = 3; // 连续失败 3 次后自动停止
   let consecutiveFailures = 0; // 连续失败计数器
@@ -507,7 +514,13 @@ async function exportAllComments({ bvid }) {
       `正在获取评论... 已获取 ${mainItems.length} 条（第 ${page} 页）`
     );
 
-    await randomSleep(sleepMs);
+    await randomSleep(mainSleepMs); // 主评论使用 500ms 延迟
+
+    // 每 10 页暂停 10 秒，避免累积请求触发限制
+    if (page % 10 === 0) {
+      sendProgress(`已获取 ${page} 页评论，暂停 10 秒以避免触发限制...`);
+      await sleep(10000); // 固定暂停 10 秒
+    }
 
     if (page > 5000) throw new Error("主评论翻页异常：page 超限（防死循环）");
   }
@@ -575,12 +588,12 @@ async function exportAllComments({ bvid }) {
         throw new Error(`连续失败 ${consecutiveFailures} 次，疑似触发反爬虫机制，已自动停止。建议等待 10-30 分钟后重试。`);
       }
 
-      await randomSleep(sleepMs);
+      await randomSleep(subSleepMs); // 子评论探测失败后的延迟
       continue;
     }
 
     if (subCount <= 0) {
-      await randomSleep(sleepMs);
+      await randomSleep(subSleepMs); // 无子评论时的延迟
       continue;
     }
 
@@ -597,7 +610,7 @@ async function exportAllComments({ bvid }) {
       );
 
       subTotalFetched += subReplies.length;
-      await randomSleep(sleepMs);
+      await randomSleep(subSleepMs); // 子评论翻页延迟
       if (pn > 5000) throw new Error(`子评论翻页异常 root=${main.rpid}：pn 超限（防死循环）`);
     }
 
@@ -620,7 +633,8 @@ async function exportAllComments({ bvid }) {
       all_total_fetched: enriched.length + subTotalFetched,
       cursor_all_count: cursorAllCount,
       sub_page_size: subPageSize,
-      sleep_ms: sleepMs,
+      main_sleep_ms: mainSleepMs,
+      sub_sleep_ms: subSleepMs,
       generated_at: new Date().toISOString(),
     },
     comments: enriched,
@@ -645,7 +659,8 @@ async function exportAllComments({ bvid }) {
       lastExportBvid: bvid,
       lastExportTime: new Date().toISOString(),
       lastExportCount: enriched.length,
-      lastExportMeta: { ...out.meta, duration_ms: durationMs } // 添加耗时
+      lastExportMeta: { ...out.meta, duration_ms: durationMs }, // 添加耗时
+      isExporting: false // 导出完成，重置状态
     });
 
     // 发送完成消息到popup

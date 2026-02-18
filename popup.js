@@ -3,6 +3,7 @@ const $status = document.getElementById("status");
 const $btn = document.getElementById("exportBtn");
 const $stopBtn = document.getElementById("stopBtn");
 const $viewResultsBtn = document.getElementById("viewResultsBtn");
+const $clearCacheBtn = document.getElementById("clearCacheBtn");
 const $cacheNotice = document.getElementById("cacheNotice");
 const $cacheInfo = document.getElementById("cacheInfo");
 
@@ -63,6 +64,7 @@ function showCacheInfo(cacheData) {
   $cacheInfo.textContent = `${totalCount.toLocaleString()} 条评论 | ${timeStr}`;
   $cacheNotice.classList.add("visible");
   $viewResultsBtn.classList.add("visible");
+  $clearCacheBtn.style.display = "block"; // 显示清除缓存图标
   $btn.textContent = "重新导出";
 }
 
@@ -92,6 +94,16 @@ async function init() {
 
   $bvid.textContent = bvid;
 
+  // 检查是否正在导出
+  const { isExporting } = await chrome.storage.local.get({ isExporting: false });
+  if (isExporting) {
+    // 正在导出，显示停止按钮
+    $btn.style.display = "none";
+    $stopBtn.style.display = "block";
+    $stopBtn.disabled = false;
+    setStatus("导出进行中...");
+  }
+
   // 检查是否有缓存
   const cacheData = await checkCache(bvid);
   if (cacheData.hasCache) {
@@ -109,6 +121,27 @@ async function init() {
       url: chrome.runtime.getURL("results.html"),
       active: true
     });
+  });
+
+  // 清除缓存图标按钮
+  $clearCacheBtn.addEventListener("click", async () => {
+    const confirmed = confirm("确定要清除所有缓存数据吗？\n\n此操作不可恢复。");
+    if (!confirmed) return;
+
+    try {
+      // 清空所有缓存
+      await chrome.storage.local.clear();
+
+      // 更新 UI
+      $cacheNotice.classList.remove("visible");
+      $viewResultsBtn.classList.remove("visible");
+      $clearCacheBtn.style.display = "none";
+      $btn.textContent = "一键导出";
+
+      setStatus("缓存已清除");
+    } catch (e) {
+      setStatus(`清除失败：${e?.message || String(e)}`, "err");
+    }
   });
 
   // 停止按钮
@@ -142,9 +175,10 @@ async function init() {
         'lastExportMeta'
       ]);
 
-      // 隐藏缓存提示和查看结果按钮
+      // 隐藏缓存提示、查看结果按钮和清除缓存图标
       $cacheNotice.classList.remove("visible");
       $viewResultsBtn.classList.remove("visible");
+      $clearCacheBtn.style.display = "none";
       $btn.textContent = "一键导出";
     }
 

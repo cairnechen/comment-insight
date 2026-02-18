@@ -1,0 +1,14 @@
+# 交接摘要（自动生成，不提交到仓库）
+HANDOFF.md
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+
+# IDE 文件
+.vscode/
+.idea/
+
+# 临时文件
+*.log
+*.tmp
