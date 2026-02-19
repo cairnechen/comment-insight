@@ -444,7 +444,7 @@ $aiSummaryBtn.addEventListener("click", async () => {
     const aiResponse = await callGeminiAPI({
       apiEndpoint: config.apiEndpoint,
       apiKey: config.apiKey,
-      modelName: config.modelName || "gemini-2.0-flash-exp",
+      modelName: config.modelName || "gemini-2.5-flash",
       temperature: config.temperature || 0.7,
       prompt: prompt,
       commentsData: exportData.comments
