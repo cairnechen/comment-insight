@@ -112,86 +112,13 @@ async function downloadGzip({ text, filename }) {
 }
 
 // AI Summary functions
-const PROMPT_TEMPLATES = {
-  summary: `请分析以下Bilibili视频的评论数据，并提供详细的总结报告。
-
-评论数据是JSON格式，包含以下字段：
-- rpid: 评论ID
-- mid: 用户ID
-- uname: 用户名
-- message: 评论内容
-- like: 点赞数
-- ctime: 发布时间（Unix时间戳）
-- location: IP属地（如"IP属地：北京"）
-- root: 根评论ID（0表示主评论）
-- parent: 父评论ID（0表示主评论）
-- dialog: 对话ID（用于关联对话关系）
-- replies: 子评论数组（嵌套结构，无回复时为null）
-
-请从以下几个方面进行总结：
-1. 评论总体情况（主评论数量、回复数量、活跃程度）
-2. 主要讨论话题和观点
-3. 用户关注的重点内容
-4. 有价值的评论摘录（3-5条）
-
-请用Markdown格式输出，结构清晰，内容简洁。`,
-
-  sentiment: `请对以下Bilibili视频评论进行情感分析。
-
-评论数据是JSON格式，包含用户名(uname)、评论内容(message)、评论ID(rpid)等字段，具有树状结构(replies表示回复)。
-
-请分析：
-1. 整体情感倾向（正面/中性/负面的比例）
-2. 正面评论的主要内容
-3. 负面评论的主要关注点
-4. 争议性话题或分歧点
-5. 情感强烈的典型评论示例
-
-请用Markdown格式输出，包含数据分析和具体示例。`,
-
-  topics: `请提取和分析以下Bilibili视频评论中的热门话题。
-
-评论数据是JSON格式，具有树状结构，包含评论内容(message)、用户名(uname)、发布时间(ctime)等信息。
-
-请识别：
-1. Top 5-10 热门话题/关键词
-2. 每个话题的讨论热度（相关评论数量）
-3. 代表性评论摘录
-4. 话题之间的关联关系
-5. 时间趋势（如果能从评论时间看出）
-
-请用Markdown格式输出，使用表格、列表等方式清晰呈现。`,
-
-  controversy: `请分析以下Bilibili视频评论中的争议观点和讨论。
-
-评论数据是JSON格式，树状结构可以显示评论和回复之间的对话关系。
-
-请重点分析：
-1. 主要争议点有哪些
-2. 不同观点的阵营和论据
-3. 激烈争论的典型对话串（利用parent和root字段还原对话）
-4. 理性讨论 vs 情绪化争吵的比例
-5. 共识观点（如果有）
-
-请用Markdown格式输出，可以用对话形式展示争议讨论。`,
-
-  custom: `请分析以下Bilibili视频的评论数据。
-
-评论数据是JSON格式，包含：
-- rpid: 评论ID
-- mid: 用户ID
-- uname: 用户名
-- message: 评论内容
-- like: 点赞数
-- ctime: 发布时间（Unix时间戳）
-- location: IP属地（如"IP属地：北京"）
-- root: 根评论ID（0表示主评论）
-- parent: 父评论ID（0表示主评论）
-- dialog: 对话ID（用于关联对话关系）
-- replies: 子评论数组（嵌套结构，无回复时为null）
-
-请根据数据内容进行分析和总结。`
-};
+// 从 prompts/ 文件夹加载模板内容
+async function loadPromptTemplate(name) {
+  const url = chrome.runtime.getURL(`prompts/${encodeURIComponent(name)}.md`);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`模板文件不存在：${name}.md`);
+  return res.text();
+}
 
 async function callGeminiAPI({ apiEndpoint, apiKey, modelName, temperature, prompt, commentsData }) {
   let apiUrl = apiEndpoint.trim();
@@ -280,19 +207,11 @@ async function checkGeminiConfig() {
     chrome.storage.local.get({
       apiEndpoint: "",
       apiKey: "",
-      promptTemplate: "summary",
-      customPrompt: ""
+      promptTemplate: ""
     }, (res) => {
-      const hasEndpoint = res.apiEndpoint && res.apiEndpoint.trim();
-      const hasApiKey = res.apiKey && res.apiKey.trim();
-
-      let hasPrompt = false;
-      if (res.promptTemplate === "custom") {
-        hasPrompt = res.customPrompt && res.customPrompt.trim();
-      } else {
-        hasPrompt = true;
-      }
-
+      const hasEndpoint = !!(res.apiEndpoint && res.apiEndpoint.trim());
+      const hasApiKey = !!(res.apiKey && res.apiKey.trim());
+      const hasPrompt = !!(res.promptTemplate && res.promptTemplate.trim());
       resolve({
         isValid: hasEndpoint && hasApiKey && hasPrompt,
         ...res
@@ -432,13 +351,8 @@ $aiSummaryBtn.addEventListener("click", async () => {
     $aiSummaryBtn.disabled = true;
     showStatus("⏳", "正在调用 Gemini API 进行分析...\n这可能需要一些时间，请耐心等待");
 
-    // 获取prompt
-    let prompt = "";
-    if (config.promptTemplate === "custom") {
-      prompt = config.customPrompt || PROMPT_TEMPLATES.summary;
-    } else {
-      prompt = PROMPT_TEMPLATES[config.promptTemplate] || PROMPT_TEMPLATES.summary;
-    }
+    // 从文件加载模板内容
+    const prompt = await loadPromptTemplate(config.promptTemplate);
 
     // 调用API
     const aiResponse = await callGeminiAPI({

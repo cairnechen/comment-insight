@@ -70,25 +70,17 @@
 
       <!-- 提示词配置 -->
       <div class="section">
-        <div class="section-title">提示词配置</div>
+        <div class="section-title">提示词模板</div>
 
         <div class="config-row">
-          <label>预设模板</label>
+          <label>选择模板</label>
           <select id="promptTemplate">
-            <option value="summary">评论要点总结</option>
-            <option value="sentiment">用户情感分析</option>
-            <option value="topics">热门话题提取</option>
-            <option value="controversy">争议观点汇总</option>
-            <option value="custom">自定义…</option>
+            <!-- 由 options.js 动态填充 -->
           </select>
+          <div class="hint">模板文件位于扩展目录 prompts/ 文件夹，新增 .md 文件并在 options.js 的 PROMPT_FILES 中注册即可</div>
         </div>
 
-        <div class="config-row">
-          <label>提示词内容</label>
-          <textarea id="promptText" rows="12" placeholder="输入提示词..."></textarea>
-        </div>
-
-        <button class="btn primary save-prompt" id="savePromptBtn">💾 保存提示词</button>
+        <button class="btn primary save-prompt" id="savePromptBtn">💾 保存选择</button>
       </div>
 
       <!-- 使用说明 -->
