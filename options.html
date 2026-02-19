@@ -4,30 +4,40 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Bilibili 评论导出 - 设置</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="options.css" />
   </head>
   <body>
     <div class="container">
-      <header>
-        <h1>⚙️ Gemini AI 总结配置</h1>
-        <p class="desc">配置Gemini API以启用评论AI总结功能</p>
-      </header>
 
+      <!-- 标题 -->
+      <div class="header">
+        <div class="title">Gemini AI 配置</div>
+        <div class="subtitle">配置 API 密钥与提示词，启用评论 AI 总结功能</div>
+      </div>
+
+      <!-- API 配置 -->
       <div class="section">
-        <h2>API 配置</h2>
+        <div class="section-title">API 配置</div>
+
         <div class="config-row">
-          <label>API地址</label>
-          <input type="text" id="apiEndpoint" placeholder="https://generativelanguage.googleapis.com/v1beta/models/" />
-          <div class="hint">Gemini API的基础地址</div>
+          <label>API 地址</label>
+          <input type="text" id="apiEndpoint"
+            placeholder="https://generativelanguage.googleapis.com/v1beta/models/" />
+          <div class="hint">Gemini API 的基础地址</div>
         </div>
 
         <div class="config-row">
           <label>API Key</label>
-          <div style="display: flex; gap: 8px;">
-            <input type="password" id="apiKey" placeholder="AIzaSy..." style="flex: 1;" />
+          <div class="input-with-btn">
+            <input type="password" id="apiKey" placeholder="AIzaSy..." />
             <button class="icon-btn" id="toggleApiKey" title="显示/隐藏">👁️</button>
           </div>
-          <div class="hint">在 <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a> 获取API Key</div>
+          <div class="hint">
+            在 <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a> 获取 API Key
+          </div>
         </div>
 
         <div class="config-row">
@@ -42,9 +52,12 @@
         </div>
 
         <div class="config-row">
-          <label>Temperature <span id="temperatureValue">0.7</span></label>
+          <div class="range-header">
+            <label>Temperature</label>
+            <span id="temperatureValue">0.7</span>
+          </div>
           <input type="range" id="temperature" min="0" max="1" step="0.1" value="0.7" />
-          <div class="hint">控制输出的随机性，0为最确定，1为最随机</div>
+          <div class="hint">控制输出随机性，0 最确定，1 最随机</div>
         </div>
 
         <div class="action-row">
@@ -52,11 +65,13 @@
           <button class="btn secondary" id="testApiBtn">🔍 测试连接</button>
         </div>
 
-        <div id="testResult" class="result" style="display: none;"></div>
+        <div id="testResult" style="display: none;"></div>
       </div>
 
+      <!-- 提示词配置 -->
       <div class="section">
-        <h2>提示词配置</h2>
+        <div class="section-title">提示词配置</div>
+
         <div class="config-row">
           <label>预设模板</label>
           <select id="promptTemplate">
@@ -64,7 +79,7 @@
             <option value="sentiment">用户情感分析</option>
             <option value="topics">热门话题提取</option>
             <option value="controversy">争议观点汇总</option>
-            <option value="custom">自定义...</option>
+            <option value="custom">自定义…</option>
           </select>
         </div>
 
@@ -73,20 +88,21 @@
           <textarea id="promptText" rows="12" placeholder="输入提示词..."></textarea>
         </div>
 
-        <button class="btn primary" id="savePromptBtn">💾 保存提示词</button>
+        <button class="btn primary save-prompt" id="savePromptBtn">💾 保存提示词</button>
       </div>
 
+      <!-- 使用说明 -->
       <div class="section">
-        <h2>使用说明</h2>
+        <div class="section-title">使用说明</div>
         <ul class="help-list">
-          <li>在Bilibili视频页面点击扩展图标，先导出评论</li>
-          <li>导出完成后，点击"AI总结"按钮即可调用Gemini进行分析</li>
-          <li>评论数据会缓存在本地，无需重复导出</li>
-          <li>自定义提示词时，评论数据格式为JSON，包含rpid、uname、message、children等字段</li>
+          <li>在 Bilibili 视频页面点击扩展图标，先导出评论数据</li>
+          <li>导出完成后，点击"AI 总结"按钮即可调用 Gemini 进行分析</li>
+          <li>评论数据缓存在本地 IndexedDB，无需重复导出</li>
+          <li>自定义提示词时，数据为 JSON 格式，包含 rpid、uname、message、replies 等字段</li>
         </ul>
       </div>
-    </div>
 
+    </div>
     <script src="options.js"></script>
   </body>
 </html>
