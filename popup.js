@@ -6,6 +6,11 @@ const $viewResultsBtn = document.getElementById("viewResultsBtn");
 const $clearCacheBtn = document.getElementById("clearCacheBtn");
 const $cacheNotice = document.getElementById("cacheNotice");
 const $cacheInfo = document.getElementById("cacheInfo");
+const $tabExport = document.getElementById("tabExport");
+const $tabLibrary = document.getElementById("tabLibrary");
+const $contentExport = document.getElementById("contentExport");
+const $contentLibrary = document.getElementById("contentLibrary");
+const $libraryList = document.getElementById("libraryList");
 
 function setStatus(text, kind = "muted") {
   $status.textContent = text;
@@ -25,37 +30,81 @@ async function getActiveTab() {
   return tab;
 }
 
+// IndexedDB 辅助函数
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("comment-insight", 1);
+    req.onupgradeneeded = (e) => {
+      e.target.result.createObjectStore("exports", { keyPath: "bvid" });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbGetAll() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("exports", "readonly");
+    const req = tx.objectStore("exports").getAll();
+    req.onsuccess = () => {
+      const records = req.result || [];
+      records.sort((a, b) => new Date(b.time) - new Date(a.time));
+      resolve(records);
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbGet(bvid) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("exports", "readonly");
+    const req = tx.objectStore("exports").get(bvid);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbDelete(bvid) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("exports", "readwrite");
+    tx.objectStore("exports").delete(bvid);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function idbClear() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("exports", "readwrite");
+    tx.objectStore("exports").clear();
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 // 检查当前视频是否有缓存
 async function checkCache(bvid) {
-  return new Promise((resolve) => {
-    chrome.storage.local.get({
-      lastExportBvid: null,
-      lastExportTime: null,
-      lastExportCount: 0,
-      lastExportMeta: null
-    }, (res) => {
-      if (res.lastExportBvid === bvid && res.lastExportTime) {
-        resolve({
-          hasCache: true,
-          bvid: res.lastExportBvid,
-          time: res.lastExportTime,
-          count: res.lastExportCount,
-          meta: res.lastExportMeta
-        });
-      } else {
-        resolve({ hasCache: false });
-      }
-    });
-  });
+  const record = await idbGet(bvid);
+  if (record) {
+    return {
+      hasCache: true,
+      bvid: record.bvid,
+      time: record.time,
+      count: record.count,
+      meta: record.meta
+    };
+  }
+  return { hasCache: false };
 }
 
 // 检查是否有任何缓存（不限制 bvid），用于控制清除缓存按钮显示
 async function checkAnyCache() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get({ lastExportTime: null }, (res) => {
-      resolve(!!res.lastExportTime);
-    });
-  });
+  const records = await idbGetAll();
+  return records.length > 0;
 }
 
 // 显示缓存信息
@@ -67,15 +116,143 @@ function showCacheInfo(cacheData) {
     minute: '2-digit'
   });
 
-  const mainCount = cacheData.meta?.main_total || cacheData.count;
   const totalCount = cacheData.meta?.all_total_fetched || cacheData.count;
 
   $cacheInfo.textContent = `${totalCount.toLocaleString()} 条评论 | ${timeStr}`;
   $cacheNotice.classList.add("visible");
   $viewResultsBtn.classList.add("visible");
-  $clearCacheBtn.style.display = "block"; // 显示清除缓存图标
+  $clearCacheBtn.style.display = "block";
   $btn.textContent = "重新导出";
 }
+
+// 更新进行中条目的进度（只更新 DOM，不重渲染整个列表）
+async function updateProgressCard() {
+  if (!$contentLibrary.classList.contains("active")) return;
+  const item = $libraryList.querySelector(".library-item-active");
+  if (!item) return;
+
+  const { progressFetched, progressTotal } = await chrome.storage.local.get({
+    progressFetched: 0,
+    progressTotal: 0
+  });
+
+  if (progressTotal <= 0) return;
+
+  const pct = Math.min(100, Math.round(progressFetched / progressTotal * 100));
+  item.querySelector(".library-item-progress-text").textContent =
+    `${progressFetched.toLocaleString()} / ${progressTotal.toLocaleString()} 条`;
+  const pctEl = item.querySelector(".library-item-pct");
+  pctEl.textContent = `${pct}%`;
+  pctEl.style.color = "";
+  pctEl.style.fontSize = "";
+  item.querySelector(".progress-fill").style.width = `${pct}%`;
+}
+
+// 渲染已下载列表（含进行中条目）
+async function renderLibrary() {
+  const { exportingBvid, progressFetched, progressTotal } = await chrome.storage.local.get({
+    exportingBvid: null,
+    progressFetched: 0,
+    progressTotal: 0
+  });
+
+  $libraryList.innerHTML = "";
+
+  // 进行中条目（排在列表顶部）
+  if (exportingBvid) {
+    const hasProgress = progressTotal > 0;
+    const pct = hasProgress
+      ? Math.min(100, Math.round(progressFetched / progressTotal * 100))
+      : 0;
+
+    const activeItem = document.createElement("div");
+    activeItem.className = "library-item-active";
+    activeItem.innerHTML = hasProgress
+      ? `<div class="library-item-active-body">
+           <div class="library-item-info">
+             <div class="library-item-bvid">${exportingBvid}</div>
+             <div class="library-item-progress-text">${progressFetched.toLocaleString()} / ${progressTotal.toLocaleString()} 条</div>
+           </div>
+           <div class="library-item-pct">${pct}%</div>
+         </div>
+         <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>`
+      : `<div class="library-item-active-body">
+           <div class="library-item-info">
+             <div class="library-item-bvid">${exportingBvid}</div>
+             <div class="library-item-progress-text">导出进行中
+               <span class="dot-loader"><span></span><span></span><span></span></span>
+             </div>
+           </div>
+           <div class="library-item-pct" style="color:var(--text-muted);font-size:13px;">…</div>
+         </div>
+         <div class="progress-track"><div class="progress-fill" style="width:0%"></div></div>`;
+    $libraryList.appendChild(activeItem);
+  }
+
+  // 已完成条目
+  const records = await idbGetAll();
+  if (records.length === 0 && !exportingBvid) {
+    $libraryList.innerHTML = '<div class="library-empty">暂无下载记录</div>';
+    return;
+  }
+
+  for (const rec of records) {
+    const timeStr = new Date(rec.time).toLocaleString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+    const totalCount = rec.meta?.all_total_fetched || rec.count;
+
+    const item = document.createElement("div");
+    item.className = "library-item";
+    item.innerHTML = `
+      <div class="library-item-info">
+        <div class="library-item-bvid">${rec.bvid}</div>
+        <div class="library-item-meta">${totalCount.toLocaleString()} 条评论 · ${timeStr}</div>
+      </div>
+      <div class="library-item-actions">
+        <button class="lib-btn lib-btn-view" data-bvid="${rec.bvid}">查看</button>
+        <button class="lib-btn lib-btn-del" data-bvid="${rec.bvid}">删除</button>
+      </div>
+    `;
+
+    item.querySelector(".lib-btn-view").addEventListener("click", async () => {
+      const url = chrome.runtime.getURL("results.html") + "?bvid=" + encodeURIComponent(rec.bvid);
+      await chrome.tabs.create({ url, active: true });
+    });
+
+    item.querySelector(".lib-btn-del").addEventListener("click", async () => {
+      await idbDelete(rec.bvid);
+      await renderLibrary();
+      if (!(await checkAnyCache())) {
+        $clearCacheBtn.style.display = "none";
+      }
+    });
+
+    $libraryList.appendChild(item);
+  }
+}
+
+// Tab 切换
+function switchTab(tab) {
+  if (tab === "export") {
+    $tabExport.classList.add("active");
+    $tabLibrary.classList.remove("active");
+    $contentExport.classList.add("active");
+    $contentLibrary.classList.remove("active");
+  } else {
+    $tabLibrary.classList.add("active");
+    $tabExport.classList.remove("active");
+    $contentLibrary.classList.add("active");
+    $contentExport.classList.remove("active");
+    renderLibrary();
+  }
+}
+
+$tabExport.addEventListener("click", () => switchTab("export"));
+$tabLibrary.addEventListener("click", () => switchTab("library"));
 
 async function init() {
   let bvid = null;
@@ -103,10 +280,10 @@ async function init() {
 
   $bvid.textContent = bvid;
 
-  // 检查是否正在导出
-  const { isExporting } = await chrome.storage.local.get({ isExporting: false });
-  if (isExporting) {
-    // 正在导出，显示停止按钮
+  // 检查是否正在导出（关联 bvid）
+  const { exportingBvid } = await chrome.storage.local.get({ exportingBvid: null });
+  if (exportingBvid === bvid) {
+    // 当前视频正在导出，显示停止按钮
     $btn.style.display = "none";
     $stopBtn.style.display = "block";
     $stopBtn.disabled = false;
@@ -131,10 +308,8 @@ async function init() {
 
   // 查看结果按钮
   $viewResultsBtn.addEventListener("click", async () => {
-    await chrome.tabs.create({
-      url: chrome.runtime.getURL("results.html"),
-      active: true
-    });
+    const url = chrome.runtime.getURL("results.html") + "?bvid=" + encodeURIComponent(bvid);
+    await chrome.tabs.create({ url, active: true });
   });
 
   // 清除缓存图标按钮
@@ -143,10 +318,17 @@ async function init() {
     if (!confirmed) return;
 
     try {
-      // 清空所有缓存
-      await chrome.storage.local.clear();
+      await idbClear();
+      // 只删除旧的 lastExport* key，保留 Gemini 配置和 exportingBvid
+      await chrome.storage.local.remove([
+        'lastExportedComments',
+        'lastExportedJson',
+        'lastExportBvid',
+        'lastExportTime',
+        'lastExportCount',
+        'lastExportMeta'
+      ]);
 
-      // 更新 UI
       $cacheNotice.classList.remove("visible");
       $viewResultsBtn.classList.remove("visible");
       $clearCacheBtn.style.display = "none";
@@ -171,6 +353,13 @@ async function init() {
 
   // 导出按钮
   $btn.addEventListener("click", async () => {
+    // 检查是否有其他视频正在导出
+    const { exportingBvid } = await chrome.storage.local.get({ exportingBvid: null });
+    if (exportingBvid && exportingBvid !== bvid) {
+      alert(`当前正在导出其他视频的评论（${exportingBvid}），请稍后再试。`);
+      return;
+    }
+
     // 如果有缓存，确认是否要重新导出
     const cacheData = await checkCache(bvid);
     if (cacheData.hasCache) {
@@ -179,24 +368,17 @@ async function init() {
         return;
       }
 
-      // 用户确认重新导出，立即清除缓存并更新 UI
-      await chrome.storage.local.remove([
-        'lastExportedComments',
-        'lastExportedJson',
-        'lastExportBvid',
-        'lastExportTime',
-        'lastExportCount',
-        'lastExportMeta'
-      ]);
+      // 用户确认重新导出，从 IndexedDB 删除该 bvid 的记录，并更新 UI
+      await idbDelete(bvid);
 
-      // 隐藏缓存提示、查看结果按钮和清除缓存图标
       $cacheNotice.classList.remove("visible");
       $viewResultsBtn.classList.remove("visible");
-      $clearCacheBtn.style.display = "none";
+      if (!(await checkAnyCache())) {
+        $clearCacheBtn.style.display = "none";
+      }
       $btn.textContent = "一键导出";
     }
 
-    // 隐藏导出按钮，显示停止按钮
     $btn.style.display = "none";
     $stopBtn.style.display = "block";
     $stopBtn.disabled = false;
@@ -221,17 +403,16 @@ chrome.runtime.onMessage.addListener(async (msg) => {
 
   if (msg.type === "PROGRESS") {
     setStatus(msg.text || "处理中…");
+    updateProgressCard(); // 只更新进度条 DOM，不重渲染列表
     return;
   }
 
   if (msg.type === "DONE") {
     setStatus(`完成 ✅\n总评论：${msg.all_total_fetched}（主 ${msg.main_total} + 子 ${msg.sub_total_fetched}）\n正在打开结果页面…`, "ok");
-    // 显示导出按钮，隐藏停止按钮
     $btn.style.display = "block";
     $btn.disabled = false;
     $stopBtn.style.display = "none";
 
-    // 立即检查缓存并更新UI（不需要延迟，因为 DONE 消息时缓存已保存）
     const tab = await getActiveTab();
     const currentBvid = parseBvidFromUrl(tab?.url);
     if (currentBvid) {
@@ -240,12 +421,19 @@ chrome.runtime.onMessage.addListener(async (msg) => {
         showCacheInfo(cacheData);
       }
     }
+    // 更新扫帚按钮
+    if (await checkAnyCache()) {
+      $clearCacheBtn.style.display = "block";
+    }
+    // 下载管理 tab：进行中条目消失，刷新为已完成列表
+    if ($contentLibrary.classList.contains("active")) {
+      renderLibrary();
+    }
     return;
   }
 
   if (msg.type === "ERROR") {
     setStatus(`失败：${msg.error}`, "err");
-    // 显示导出按钮，隐藏停止按钮
     $btn.style.display = "block";
     $btn.disabled = false;
     $stopBtn.style.display = "none";

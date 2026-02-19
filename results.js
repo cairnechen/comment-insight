@@ -301,34 +301,71 @@ async function checkGeminiConfig() {
   });
 }
 
-// Load data from storage
-async function loadData() {
+// IndexedDB 辅助函数
+function openDB() {
   return new Promise((resolve, reject) => {
-    chrome.storage.local.get({
-      lastExportedJson: null,
-      lastExportedComments: null,
-      lastExportBvid: null,
-      lastExportTime: null,
-      lastExportCount: 0,
-      lastExportMeta: null
-    }, (res) => {
-      if (!res.lastExportedJson || !res.lastExportBvid) {
-        reject(new Error("没有找到导出数据"));
-        return;
-      }
-
-      exportData = {
-        json: res.lastExportedJson,
-        comments: res.lastExportedComments,
-        bvid: res.lastExportBvid,
-        time: res.lastExportTime,
-        count: res.lastExportCount,
-        meta: res.lastExportMeta
-      };
-
-      resolve(exportData);
-    });
+    const req = indexedDB.open("comment-insight", 1);
+    req.onupgradeneeded = (e) => {
+      e.target.result.createObjectStore("exports", { keyPath: "bvid" });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
   });
+}
+
+async function idbGet(bvid) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("exports", "readonly");
+    const req = tx.objectStore("exports").get(bvid);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbGetAll() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("exports", "readonly");
+    const req = tx.objectStore("exports").getAll();
+    req.onsuccess = () => {
+      const records = req.result || [];
+      records.sort((a, b) => new Date(b.time) - new Date(a.time));
+      resolve(records);
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// Load data from IndexedDB
+async function loadData() {
+  // 从 URL 参数解析 bvid
+  const params = new URLSearchParams(location.search);
+  const bvidParam = params.get("bvid");
+
+  let record = null;
+  if (bvidParam) {
+    record = await idbGet(bvidParam);
+  } else {
+    // 无参数时取最新一条
+    const all = await idbGetAll();
+    record = all.length > 0 ? all[0] : null;
+  }
+
+  if (!record) {
+    throw new Error("没有找到导出数据");
+  }
+
+  exportData = {
+    json: record.json,
+    comments: record.comments,
+    bvid: record.bvid,
+    time: record.time,
+    count: record.count,
+    meta: record.meta
+  };
+
+  return exportData;
 }
 
 // Display data

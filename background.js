@@ -2,6 +2,38 @@
 // MV3 Service Worker
 // =======================
 
+// IndexedDB 辅助函数
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("comment-insight", 1);
+    req.onupgradeneeded = (e) => {
+      e.target.result.createObjectStore("exports", { keyPath: "bvid" });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbSave(record) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("exports", "readwrite");
+    tx.objectStore("exports").put(record);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function idbClear() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("exports", "readwrite");
+    tx.objectStore("exports").clear();
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 // 全局停止标志和中止控制器
 let shouldStop = false;
 let abortController = null; // 用于中止正在进行的网络请求
@@ -12,15 +44,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     abortController = new AbortController(); // 创建新的中止控制器
     (async () => {
       try {
-        // 设置导出状态为进行中
-        await chrome.storage.local.set({ isExporting: true });
-
         const { bvid } = msg;
+        // 记录正在导出的 bvid
+        await chrome.storage.local.set({ exportingBvid: bvid });
+
         await exportAllComments({ bvid });
         sendResponse({ ok: true });
       } catch (err) {
-        // 导出失败，重置状态
-        await chrome.storage.local.set({ isExporting: false });
+        // 导出失败，清除导出状态
+        await chrome.storage.local.set({ exportingBvid: null, progressFetched: 0, progressTotal: 0 });
 
         // 如果是用户手动中止，使用更友好的错误消息
         const errorMsg = err.name === "AbortError"
@@ -64,17 +96,21 @@ function randomSleep(baseMs) {
   return sleep(Math.round(ms));
 }
 
-function sendProgress(text) {
+function sendProgress(text, fetched = -1) {
   if (shouldStop) return; // 已停止，不再发送后续进度消息
   chrome.runtime.sendMessage({ type: "PROGRESS", text });
+  if (fetched >= 0) {
+    chrome.storage.local.set({ progressFetched: fetched }); // fire-and-forget
+  }
 }
 
 function parseAidFromViewApi(respJson) {
   // https://api.bilibili.com/x/web-interface/view?bvid=...
   const data = respJson?.data;
-  const aid = data?.aid || data?.cid ? data?.aid : data?.aid;
+  const aid = data?.aid;
   if (!aid) throw new Error("无法从 view api 获取 aid/oid");
-  return aid;
+  const statReply = Number(data?.stat?.reply || 0);
+  return { aid, statReply };
 }
 
 function pickLocation(reply) {
@@ -314,7 +350,7 @@ async function fetchOidByBvid(bvid) {
   const url = `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`;
   const json = await fetchJson(url);
   if (json?.code !== 0) throw new Error(`view api error: ${json?.code} ${json?.message || ""}`);
-  return parseAidFromViewApi(json);
+  return parseAidFromViewApi(json); // { aid, statReply }
 }
 
 async function fetchMainPage({ oid, type, mode, offset, mixinKey }) {
@@ -481,7 +517,10 @@ async function downloadTextAsJson({ text, filename }) {
 async function exportAllComments({ bvid }) {
   const startTime = Date.now(); // 记录开始时间
 
-  const oid = await fetchOidByBvid(bvid);
+  const { aid: oid, statReply: totalComments } = await fetchOidByBvid(bvid);
+  // 写入进度总数（导出开始时 total 确定，fetched 从 0 起）
+  await chrome.storage.local.set({ progressFetched: 0, progressTotal: totalComments });
+
   const type = 1;
   const mode = 2;
   const mainSleepMs = 400; // 主评论延迟 400ms（实际 280-520ms 随机）
@@ -526,7 +565,8 @@ async function exportAllComments({ bvid }) {
     isEnd = !!cursor?.is_end;
 
     sendProgress(
-      `正在获取评论... 已获取 ${mainItems.length} 条（第 ${page} 页）`
+      `正在获取评论... 已获取 ${mainItems.length} 条（第 ${page} 页）`,
+      mainItems.length
     );
 
     await randomSleep(mainSleepMs); // 主评论使用 500ms 延迟
@@ -572,7 +612,10 @@ async function exportAllComments({ bvid }) {
         const subReplies = subJson?.data?.replies || [];
         allSubRaw.push(...subReplies);
         subTotalFetched += subReplies.length;
-        sendProgress(`正在获取回复... 已获取 ${subTotalFetched} 条`);
+        sendProgress(
+          `正在获取回复... 已获取 ${subTotalFetched} 条`,
+          mainItems.length + subTotalFetched
+        );
         consecutiveFailures = 0;
       } catch (e) {
         consecutiveFailures++;
@@ -617,22 +660,22 @@ async function exportAllComments({ bvid }) {
   const endTime = Date.now();
   const durationMs = endTime - startTime;
 
-  // 保存评论数据到chrome.storage.local
+  // 保存评论数据到 IndexedDB
   sendProgress("正在保存数据…");
   try {
     // 准备简化的评论数据（只保留AI需要的字段，减小存储大小）
     const simplifiedComments = prepareCommentsForAI(enriched);
 
-    // 保存到storage，包含元数据和完整JSON
-    await chrome.storage.local.set({
-      lastExportedComments: simplifiedComments,
-      lastExportedJson: jsonText,
-      lastExportBvid: bvid,
-      lastExportTime: new Date().toISOString(),
-      lastExportCount: enriched.length,
-      lastExportMeta: { ...out.meta, duration_ms: durationMs }, // 添加耗时
-      isExporting: false // 导出完成，重置状态
+    // 保存到 IndexedDB
+    await idbSave({
+      bvid,
+      json: jsonText,
+      comments: simplifiedComments,
+      time: new Date().toISOString(),
+      count: enriched.length,
+      meta: { ...out.meta, duration_ms: durationMs }
     });
+    await chrome.storage.local.set({ exportingBvid: null, progressFetched: 0, progressTotal: 0 });
 
     // 发送完成消息到popup
     chrome.runtime.sendMessage({
@@ -642,18 +685,17 @@ async function exportAllComments({ bvid }) {
       all_total_fetched: out.meta.all_total_fetched,
     });
 
-    // 打开结果页面
+    // 打开结果页面（带 bvid 参数）
     await chrome.tabs.create({
-      url: chrome.runtime.getURL("results.html"),
+      url: chrome.runtime.getURL("results.html") + "?bvid=" + encodeURIComponent(bvid),
       active: true
     });
   } catch (err) {
-    // 如果存储失败（可能是数据太大），仍然尝试打开结果页面
-    console.error("保存评论数据到storage失败:", err);
+    console.error("保存评论数据到 IndexedDB 失败:", err);
 
     chrome.runtime.sendMessage({
       type: "ERROR",
-      error: `数据保存失败：${err?.message || String(err)}。数据可能过大，请尝试导出较少评论的视频。`
+      error: `数据保存失败：${err?.message || String(err)}`
     });
   }
 }
