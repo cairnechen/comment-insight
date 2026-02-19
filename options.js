@@ -14,7 +14,19 @@ const $saveConfigBtn = document.getElementById("saveConfigBtn");
 const $testApiBtn = document.getElementById("testApiBtn");
 const $testResult = document.getElementById("testResult");
 const $promptTemplate = document.getElementById("promptTemplate");
+const $promptPreview = document.getElementById("promptPreview");
 const $savePromptBtn = document.getElementById("savePromptBtn");
+
+// 加载并显示模板内容（只读预览）
+async function loadPromptPreview(name) {
+  try {
+    const url = chrome.runtime.getURL(`prompts/${encodeURIComponent(name)}.md`);
+    const res = await fetch(url);
+    $promptPreview.value = res.ok ? await res.text() : "（模板文件未找到）";
+  } catch {
+    $promptPreview.value = "（加载失败）";
+  }
+}
 
 // 动态填充模板下拉列表
 function buildPromptSelect() {
@@ -33,7 +45,7 @@ function loadConfig() {
     apiEndpoint: "https://generativelanguage.googleapis.com/v1beta/models/",
     apiKey: "",
     modelName: "gemini-2.5-flash",
-    temperature: 0.7,
+    temperature: 0.1,
     promptTemplate: PROMPT_FILES[0] ?? ""
   }, (res) => {
     $apiEndpoint.value = res.apiEndpoint;
@@ -136,7 +148,9 @@ $temperature.addEventListener("input", () => {
 $saveConfigBtn.addEventListener("click", saveConfig);
 $testApiBtn.addEventListener("click", testConnection);
 $savePromptBtn.addEventListener("click", savePrompt);
+$promptTemplate.addEventListener("change", () => loadPromptPreview($promptTemplate.value));
 
 // 初始化
 buildPromptSelect();
 loadConfig();
+loadPromptPreview(PROMPT_FILES[0]);

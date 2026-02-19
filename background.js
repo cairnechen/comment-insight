@@ -663,14 +663,11 @@ async function exportAllComments({ bvid }) {
   // 保存评论数据到 IndexedDB
   sendProgress("正在保存数据…");
   try {
-    // 准备简化的评论数据（只保留AI需要的字段，减小存储大小）
-    const simplifiedComments = prepareCommentsForAI(enriched);
-
     // 保存到 IndexedDB
     await idbSave({
       bvid,
       json: jsonText,
-      comments: simplifiedComments,
+      comments: enriched,
       time: new Date().toISOString(),
       count: enriched.length,
       meta: { ...out.meta, duration_ms: durationMs }
@@ -700,24 +697,3 @@ async function exportAllComments({ bvid }) {
   }
 }
 
-// 准备评论数据：只保留AI分析需要的字段
-function prepareCommentsForAI(comments) {
-  function simplifyNode(node) {
-    const replies = node.replies;
-    return {
-      rpid: node.rpid,
-      mid: node.mid,
-      uname: node.uname,
-      message: node.message,
-      like: node.like,
-      ctime: node.ctime,
-      location: node.location,
-      root: node.root,
-      parent: node.parent,
-      dialog: node.dialog,
-      replies: replies && replies.length > 0 ? replies.map(simplifyNode) : null
-    };
-  }
-
-  return comments.map(simplifyNode);
-}

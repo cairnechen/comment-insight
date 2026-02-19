@@ -134,7 +134,7 @@ async function callGeminiAPI({ apiEndpoint, apiKey, modelName, temperature, prom
       {
         parts: [
           {
-            text: `${prompt}\n\n以下是评论数据（JSON格式）：\n\n${JSON.stringify(commentsData, null, 2)}`
+            text: `${prompt}\n\n以下是评论数据（JSON格式）：\n\n${JSON.stringify(commentsData)}`
           }
         ]
       }
@@ -143,12 +143,12 @@ async function callGeminiAPI({ apiEndpoint, apiKey, modelName, temperature, prom
       temperature: temperature,
       topK: 40,
       topP: 0.95,
-      maxOutputTokens: 8192,
+      maxOutputTokens: 65536,
     }
   };
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000);
+  const timeoutId = setTimeout(() => controller.abort(), 300000);
 
   try {
     const response = await fetch(apiUrl, {
@@ -179,16 +179,26 @@ async function callGeminiAPI({ apiEndpoint, apiKey, modelName, temperature, prom
 
     const data = await response.json();
 
-    if (!data?.candidates?.[0]?.content?.parts?.[0]?.text) {
-      throw new Error(`Gemini API返回格式异常。响应: ${JSON.stringify(data).slice(0, 500)}`);
+    const candidate = data?.candidates?.[0];
+    const finishReason = candidate?.finishReason;
+
+    if (finishReason === "SAFETY") {
+      throw new Error("Gemini 安全过滤器拦截了本次请求，请检查评论内容或调整提示词");
+    }
+    if (finishReason === "MAX_TOKENS") {
+      // 输出被截断但仍有内容，继续使用
+      console.warn("Gemini 输出达到 token 上限，结果可能不完整");
+    }
+    if (!candidate?.content?.parts?.[0]?.text) {
+      throw new Error(`Gemini API返回格式异常 (finishReason: ${finishReason})。响应: ${JSON.stringify(data).slice(0, 500)}`);
     }
 
-    return data.candidates[0].content.parts[0].text;
+    return candidate.content.parts[0].text;
   } catch (error) {
     clearTimeout(timeoutId);
 
     if (error.name === 'AbortError') {
-      throw new Error('Gemini API请求超时（60秒），请检查网络连接或稍后重试');
+      throw new Error('Gemini API请求超时（5分钟），评论数据可能过大，请稍后重试');
     }
 
     throw error;
@@ -361,7 +371,7 @@ $aiSummaryBtn.addEventListener("click", async () => {
       modelName: config.modelName || "gemini-2.5-flash",
       temperature: config.temperature || 0.7,
       prompt: prompt,
-      commentsData: exportData.comments
+      commentsData: { bvid: exportData.bvid, comments: exportData.comments }
     });
 
     // 下载结果
@@ -394,8 +404,12 @@ async function init() {
     // 检查 Gemini 配置
     const config = await checkGeminiConfig();
     if (config.isValid) {
-      $aiConfigHint.innerHTML = `已配置 Gemini API，点击下方按钮开始分析`;
+      $aiConfigHint.innerHTML = `已配置 Gemini API &nbsp;·&nbsp; <a href="#" id="openSettings">修改设置</a>`;
       $aiConfigHint.style.color = "var(--success)";
+      document.getElementById("openSettings").addEventListener("click", (e) => {
+        e.preventDefault();
+        chrome.runtime.openOptionsPage();
+      });
     }
 
     hideStatus();

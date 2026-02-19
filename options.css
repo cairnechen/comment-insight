@@ -249,6 +249,13 @@ body::before {
   font-size: 12px;
   line-height: 1.7;
 }
+.config-row textarea[readonly] {
+  resize: none;
+  cursor: default;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-muted);
+  border-color: rgba(255, 255, 255, 0.06);
+}
 
 /* ── 提示文字 ── */
 .hint {

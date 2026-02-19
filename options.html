@@ -54,9 +54,9 @@
         <div class="config-row">
           <div class="range-header">
             <label>Temperature</label>
-            <span id="temperatureValue">0.7</span>
+            <span id="temperatureValue">0.1</span>
           </div>
-          <input type="range" id="temperature" min="0" max="1" step="0.1" value="0.7" />
+          <input type="range" id="temperature" min="0" max="1" step="0.1" value="0.1" />
           <div class="hint">控制输出随机性，0 最确定，1 最随机</div>
         </div>
 
@@ -78,6 +78,11 @@
             <!-- 由 options.js 动态填充 -->
           </select>
           <div class="hint">模板文件位于扩展目录 prompts/ 文件夹，新增 .md 文件并在 options.js 的 PROMPT_FILES 中注册即可</div>
+        </div>
+
+        <div class="config-row">
+          <label>提示词内容预览</label>
+          <textarea id="promptPreview" readonly rows="14" placeholder="加载中…"></textarea>
         </div>
 
         <button class="btn primary save-prompt" id="savePromptBtn">💾 保存选择</button>
