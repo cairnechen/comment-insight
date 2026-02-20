@@ -3,6 +3,9 @@ const PROMPT_FILES = [
   "美食探店",
 ];
 
+// 支持 thinkingConfig 的模型列表
+const THINKING_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro"];
+
 // DOM 元素
 const $apiEndpoint = document.getElementById("apiEndpoint");
 const $apiKey = document.getElementById("apiKey");
@@ -16,6 +19,8 @@ const $testResult = document.getElementById("testResult");
 const $promptTemplate = document.getElementById("promptTemplate");
 const $promptPreview = document.getElementById("promptPreview");
 const $savePromptBtn = document.getElementById("savePromptBtn");
+const $disableThinking = document.getElementById("disableThinking");
+const $thinkingRow = document.getElementById("thinkingRow");
 
 // 加载并显示模板内容（只读预览）
 async function loadPromptPreview(name) {
@@ -46,6 +51,7 @@ function loadConfig() {
     apiKey: "",
     modelName: "gemini-2.5-flash",
     temperature: 0.1,
+    disableThinking: true,
     promptTemplate: PROMPT_FILES[0] ?? ""
   }, (res) => {
     $apiEndpoint.value = res.apiEndpoint;
@@ -53,11 +59,18 @@ function loadConfig() {
     $modelName.value = res.modelName;
     $temperature.value = res.temperature;
     $temperatureValue.textContent = res.temperature;
+    $disableThinking.checked = res.disableThinking;
+    updateThinkingVisibility();
     // 若已保存的模板仍在列表中则还原，否则回退到第一个
     if (PROMPT_FILES.includes(res.promptTemplate)) {
       $promptTemplate.value = res.promptTemplate;
     }
   });
+}
+
+// 根据所选模型显示/隐藏思考模式开关
+function updateThinkingVisibility() {
+  $thinkingRow.style.display = THINKING_MODELS.includes($modelName.value) ? "" : "none";
 }
 
 // 保存 API 配置
@@ -66,7 +79,8 @@ function saveConfig() {
     apiEndpoint: $apiEndpoint.value.trim(),
     apiKey: $apiKey.value.trim(),
     modelName: $modelName.value,
-    temperature: parseFloat($temperature.value)
+    temperature: parseFloat($temperature.value),
+    disableThinking: $disableThinking.checked
   }, () => {
     showResult("✓ API 配置已保存", "success");
   });
@@ -145,6 +159,7 @@ $temperature.addEventListener("input", () => {
   $temperatureValue.textContent = $temperature.value;
 });
 
+$modelName.addEventListener("change", updateThinkingVisibility);
 $saveConfigBtn.addEventListener("click", saveConfig);
 $testApiBtn.addEventListener("click", testConnection);
 $savePromptBtn.addEventListener("click", savePrompt);

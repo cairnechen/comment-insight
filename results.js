@@ -120,7 +120,9 @@ async function loadPromptTemplate(name) {
   return res.text();
 }
 
-async function callGeminiAPI({ apiEndpoint, apiKey, modelName, temperature, prompt, commentsData }) {
+const THINKING_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro"];
+
+async function callGeminiAPI({ apiEndpoint, apiKey, modelName, temperature, disableThinking, prompt, commentsData }) {
   let apiUrl = apiEndpoint.trim();
 
   // 如果API地址是Gemini官方格式，需要拼接模型名和方法
@@ -144,6 +146,9 @@ async function callGeminiAPI({ apiEndpoint, apiKey, modelName, temperature, prom
       topK: 40,
       topP: 0.95,
       maxOutputTokens: 65536,
+      ...(THINKING_MODELS.includes(modelName) && disableThinking
+        ? { thinkingConfig: { thinkingBudget: 0 } }
+        : {})
     }
   };
 
@@ -217,7 +222,9 @@ async function checkGeminiConfig() {
     chrome.storage.local.get({
       apiEndpoint: "",
       apiKey: "",
-      promptTemplate: ""
+      promptTemplate: "",
+      modelName: "gemini-2.5-flash",
+      disableThinking: true
     }, (res) => {
       const hasEndpoint = !!(res.apiEndpoint && res.apiEndpoint.trim());
       const hasApiKey = !!(res.apiKey && res.apiKey.trim());
@@ -369,7 +376,8 @@ $aiSummaryBtn.addEventListener("click", async () => {
       apiEndpoint: config.apiEndpoint,
       apiKey: config.apiKey,
       modelName: config.modelName || "gemini-2.5-flash",
-      temperature: config.temperature || 0.7,
+      temperature: config.temperature || 0.1,
+      disableThinking: config.disableThinking ?? true,
       prompt: prompt,
       commentsData: { bvid: exportData.bvid, comments: exportData.comments }
     });
