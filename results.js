@@ -112,12 +112,43 @@ async function downloadGzip({ text, filename }) {
 }
 
 // AI Summary functions
-// 从 prompts/ 文件夹加载模板内容
+// 从 scenes/ 文件夹加载模板内容
 async function loadPromptTemplate(name) {
-  const url = chrome.runtime.getURL(`prompts/${encodeURIComponent(name)}.md`);
+  const url = chrome.runtime.getURL(`scenes/${encodeURIComponent(name)}/prompt.md`);
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`模板文件不存在：${name}.md`);
+  if (!res.ok) throw new Error(`模板文件不存在：scenes/${name}/prompt.md`);
   return res.text();
+}
+
+// 加载关键词列表；文件不存在时返回 null（graceful degradation）
+async function loadKeywords(sceneName) {
+  try {
+    const url = chrome.runtime.getURL(`scenes/${encodeURIComponent(sceneName)}/poi_keywords.txt`);
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const text = await res.text();
+    return text
+      .split("\n")
+      .map(line => line.trim())
+      .filter(line => line && !line.startsWith("#"));
+  } catch {
+    return null;
+  }
+}
+
+// 判断单个 thread（主评论及其所有层级 replies）是否命中任意关键词
+// 短路优化：命中即立刻返回 true，无需继续遍历
+function hasKeywordMatch(node, keywords) {
+  if (keywords.some(kw => node.message.includes(kw))) return true;
+  if (node.replies && node.replies.length > 0) {
+    return node.replies.some(child => hasKeywordMatch(child, keywords));
+  }
+  return false;
+}
+
+// 过滤评论数组，保留命中关键词的完整 thread
+function filterThreadsByKeywords(comments, keywords) {
+  return comments.filter(thread => hasKeywordMatch(thread, keywords));
 }
 
 const THINKING_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro"];
@@ -190,15 +221,14 @@ async function callGeminiAPI({ apiEndpoint, apiKey, modelName, temperature, disa
     if (finishReason === "SAFETY") {
       throw new Error("Gemini 安全过滤器拦截了本次请求，请检查评论内容或调整提示词");
     }
-    if (finishReason === "MAX_TOKENS") {
-      // 输出被截断但仍有内容，继续使用
-      console.warn("Gemini 输出达到 token 上限，结果可能不完整");
-    }
     if (!candidate?.content?.parts?.[0]?.text) {
       throw new Error(`Gemini API返回格式异常 (finishReason: ${finishReason})。响应: ${JSON.stringify(data).slice(0, 500)}`);
     }
 
-    return candidate.content.parts[0].text;
+    return {
+      text: candidate.content.parts[0].text,
+      truncated: finishReason === "MAX_TOKENS",
+    };
   } catch (error) {
     clearTimeout(timeoutId);
 
@@ -371,6 +401,18 @@ $aiSummaryBtn.addEventListener("click", async () => {
     // 从文件加载模板内容
     const prompt = await loadPromptTemplate(config.promptTemplate);
 
+    // 加载关键词并过滤（keywords 为 null 时跳过，发全量数据）
+    const keywords = await loadKeywords(config.promptTemplate);
+    const filteredComments = keywords
+      ? filterThreadsByKeywords(exportData.comments, keywords)
+      : exportData.comments;
+
+    if (keywords) {
+      const total = exportData.comments.length;
+      const kept = filteredComments.length;
+      showStatus("⏳", `关键词筛选：保留 ${kept} / ${total} 个话题，正在调用 Gemini API…`);
+    }
+
     // 调用API
     const aiResponse = await callGeminiAPI({
       apiEndpoint: config.apiEndpoint,
@@ -379,15 +421,19 @@ $aiSummaryBtn.addEventListener("click", async () => {
       temperature: config.temperature || 0.1,
       disableThinking: config.disableThinking ?? true,
       prompt: prompt,
-      commentsData: { bvid: exportData.bvid, comments: exportData.comments }
+      commentsData: { bvid: exportData.bvid, comments: filteredComments }
     });
 
     // 下载结果
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     const filename = `ai_summary_${exportData.bvid}_${timestamp}.md`;
-    await downloadMarkdown({ text: aiResponse, filename });
+    await downloadMarkdown({ text: aiResponse.text, filename });
 
-    showStatus("✅", `AI 总结完成！\n文件：${filename}`, "success");
+    if (aiResponse.truncated) {
+      showStatus("⚠️", `AI 总结完成，但输出已达 token 上限，结果可能不完整。\n文件：${filename}`, "warning");
+    } else {
+      showStatus("✅", `AI 总结完成！\n文件：${filename}`, "success");
+    }
     setTimeout(hideStatus, 5000);
   } catch (error) {
     showStatus("❌", `AI 总结失败：${error.message}`, "error");

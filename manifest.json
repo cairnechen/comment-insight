@@ -19,7 +19,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["prompts/*.md"],
+      "resources": ["scenes/*/*.md", "scenes/*/*.txt"],
       "matches": ["<all_urls>"]
     }
   ]

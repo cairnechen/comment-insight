@@ -1,5 +1,5 @@
 // 可用模板列表（文件名不含 .md 扩展名，顺序即下拉顺序）
-const PROMPT_FILES = [
+const SCENES = [
   "美食探店",
 ];
 
@@ -25,7 +25,7 @@ const $thinkingRow = document.getElementById("thinkingRow");
 // 加载并显示模板内容（只读预览）
 async function loadPromptPreview(name) {
   try {
-    const url = chrome.runtime.getURL(`prompts/${encodeURIComponent(name)}.md`);
+    const url = chrome.runtime.getURL(`scenes/${encodeURIComponent(name)}/prompt.md`);
     const res = await fetch(url);
     $promptPreview.value = res.ok ? await res.text() : "（模板文件未找到）";
   } catch {
@@ -36,7 +36,7 @@ async function loadPromptPreview(name) {
 // 动态填充模板下拉列表
 function buildPromptSelect() {
   $promptTemplate.innerHTML = "";
-  for (const name of PROMPT_FILES) {
+  for (const name of SCENES) {
     const opt = document.createElement("option");
     opt.value = name;
     opt.textContent = name;
@@ -52,7 +52,7 @@ function loadConfig() {
     modelName: "gemini-2.5-flash",
     temperature: 0.1,
     disableThinking: true,
-    promptTemplate: PROMPT_FILES[0] ?? ""
+    promptTemplate: SCENES[0] ?? ""
   }, (res) => {
     $apiEndpoint.value = res.apiEndpoint;
     $apiKey.value = res.apiKey;
@@ -62,7 +62,7 @@ function loadConfig() {
     $disableThinking.checked = res.disableThinking;
     updateThinkingVisibility();
     // 若已保存的模板仍在列表中则还原，否则回退到第一个
-    if (PROMPT_FILES.includes(res.promptTemplate)) {
+    if (SCENES.includes(res.promptTemplate)) {
       $promptTemplate.value = res.promptTemplate;
     }
   });
@@ -168,4 +168,4 @@ $promptTemplate.addEventListener("change", () => loadPromptPreview($promptTempla
 // 初始化
 buildPromptSelect();
 loadConfig();
-loadPromptPreview(PROMPT_FILES[0]);
+loadPromptPreview(SCENES[0]);
