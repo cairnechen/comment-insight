@@ -25,7 +25,7 @@ const $thinkingRow = document.getElementById("thinkingRow");
 // 加载并显示模板内容（只读预览）
 async function loadPromptPreview(name) {
   try {
-    const url = chrome.runtime.getURL(`scenes/${encodeURIComponent(name)}/prompt.md`);
+    const url = chrome.runtime.getURL(`scenes/${encodeURIComponent(name)}/system_prompt.md`);
     const res = await fetch(url);
     $promptPreview.value = res.ok ? await res.text() : "（模板文件未找到）";
   } catch {

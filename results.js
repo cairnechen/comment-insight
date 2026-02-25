@@ -112,11 +112,17 @@ async function downloadGzip({ text, filename }) {
 }
 
 // AI Summary functions
-// 从 scenes/ 文件夹加载模板内容
-async function loadPromptTemplate(name) {
-  const url = chrome.runtime.getURL(`scenes/${encodeURIComponent(name)}/prompt.md`);
+async function loadSystemPrompt(name) {
+  const url = chrome.runtime.getURL(`scenes/${encodeURIComponent(name)}/system_prompt.md`);
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`模板文件不存在：scenes/${name}/prompt.md`);
+  if (!res.ok) throw new Error(`system_prompt.md 不存在：scenes/${name}/`);
+  return res.text();
+}
+
+async function loadUserPrompt(name) {
+  const url = chrome.runtime.getURL(`scenes/${encodeURIComponent(name)}/user_prompt.md`);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`user_prompt.md 不存在：scenes/${name}/`);
   return res.text();
 }
 
@@ -153,7 +159,7 @@ function filterThreadsByKeywords(comments, keywords) {
 
 const THINKING_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro"];
 
-async function callGeminiAPI({ apiEndpoint, apiKey, modelName, temperature, disableThinking, prompt, commentsData }) {
+async function callGeminiAPI({ apiEndpoint, apiKey, modelName, temperature, disableThinking, systemPrompt, userPrompt, commentsData }) {
   let apiUrl = apiEndpoint.trim();
 
   // 如果API地址是Gemini官方格式，需要拼接模型名和方法
@@ -163,11 +169,14 @@ async function callGeminiAPI({ apiEndpoint, apiKey, modelName, temperature, disa
   }
 
   const requestBody = {
+    system_instruction: {
+      parts: [{ text: systemPrompt }]
+    },
     contents: [
       {
         parts: [
           {
-            text: `${prompt}\n\n以下是评论数据（JSON格式）：\n\n${JSON.stringify(commentsData)}`
+            text: `${userPrompt}\n\n以下是评论数据（JSON格式）：\n\n${JSON.stringify(commentsData)}`
           }
         ]
       }
@@ -244,6 +253,19 @@ async function downloadMarkdown({ text, filename }) {
   const enc = new TextEncoder();
   const bytes = enc.encode(text);
   downloadFile({ bytes, filename, mime: "text/markdown;charset=utf-8" });
+}
+
+async function downloadJSON({ text, filename }) {
+  // 剥掉模型可能包裹的 markdown 代码块（```json ... ```）
+  const stripped = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  let pretty;
+  try {
+    pretty = JSON.stringify(JSON.parse(stripped), null, 2);
+  } catch (e) {
+    throw new Error(`Gemini 返回内容不是合法 JSON：${e.message}`);
+  }
+  const enc = new TextEncoder();
+  downloadFile({ bytes: enc.encode(pretty), filename, mime: "application/json;charset=utf-8" });
 }
 
 // Check Gemini config
@@ -398,8 +420,11 @@ $aiSummaryBtn.addEventListener("click", async () => {
     $aiSummaryBtn.disabled = true;
     showStatus("⏳", "正在调用 Gemini API 进行分析...\n这可能需要一些时间，请耐心等待");
 
-    // 从文件加载模板内容
-    const prompt = await loadPromptTemplate(config.promptTemplate);
+    // 并行加载 system_prompt 和 user_prompt
+    const [systemPrompt, userPrompt] = await Promise.all([
+      loadSystemPrompt(config.promptTemplate),
+      loadUserPrompt(config.promptTemplate),
+    ]);
 
     // 加载关键词并过滤（keywords 为 null 时跳过，发全量数据）
     const keywords = await loadKeywords(config.promptTemplate);
@@ -420,14 +445,15 @@ $aiSummaryBtn.addEventListener("click", async () => {
       modelName: config.modelName || "gemini-2.5-flash",
       temperature: config.temperature || 0.1,
       disableThinking: config.disableThinking ?? true,
-      prompt: prompt,
+      systemPrompt,
+      userPrompt,
       commentsData: { bvid: exportData.bvid, comments: filteredComments }
     });
 
     // 下载结果
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    const filename = `ai_summary_${exportData.bvid}_${timestamp}.md`;
-    await downloadMarkdown({ text: aiResponse.text, filename });
+    const filename = `ai_summary_${exportData.bvid}_${timestamp}.json`;
+    await downloadJSON({ text: aiResponse.text, filename });
 
     if (aiResponse.truncated) {
       showStatus("⚠️", `AI 总结完成，但输出已达 token 上限，结果可能不完整。\n文件：${filename}`, "warning");
