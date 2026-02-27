@@ -255,13 +255,16 @@ async function downloadMarkdown({ text, filename }) {
   downloadFile({ bytes, filename, mime: "text/markdown;charset=utf-8" });
 }
 
-async function downloadJSON({ text, filename }) {
+async function downloadJSON({ text, filename, truncated = false }) {
   // 剥掉模型可能包裹的 markdown 代码块（```json ... ```）
   const stripped = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
   let pretty;
   try {
     pretty = JSON.stringify(JSON.parse(stripped), null, 2);
   } catch (e) {
+    if (truncated) {
+      throw new Error("输出已达 token 上限，JSON 被截断无法保存。请尝试减少评论数量或缩短提示词。");
+    }
     throw new Error(`Gemini 返回内容不是合法 JSON：${e.message}`);
   }
   const enc = new TextEncoder();
@@ -453,7 +456,7 @@ $aiSummaryBtn.addEventListener("click", async () => {
     // 下载结果
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     const filename = `ai_summary_${exportData.bvid}_${timestamp}.json`;
-    await downloadJSON({ text: aiResponse.text, filename });
+    await downloadJSON({ text: aiResponse.text, filename, truncated: aiResponse.truncated });
 
     if (aiResponse.truncated) {
       showStatus("⚠️", `AI 总结完成，但输出已达 token 上限，结果可能不完整。\n文件：${filename}`, "warning");

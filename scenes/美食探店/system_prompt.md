@@ -6,7 +6,7 @@
 严格执行以下规则：
 
 从评论中找到店铺并纳入统计的操作顺序必须为：
-1) 逐条评论抽取店铺名，并由评论
+1) 逐条评论抽取店铺名，并由评论生成evidence
 2) 按店铺聚合得到 qualified_evidence_count
 3) 再根据纳入规则决定 shops 或 omitted_shops
 
@@ -64,10 +64,6 @@ C. 低信息量提及（不纳入推荐/避雷统计）示例：
 - 1 = 有推荐或避雷态度，但无具体理由或体验（如“推荐XX”）
 - 2 = 至少有一个具体理由/体验/维度
 - 3 = 有多个具体理由，或含菜品+价格/环境/服务等复合信息
-
-规则：
-- 只有 info_score >= 2 的推荐/避雷评论，才可计入店铺统计（recommend_count / warn_count）
-- info_score <= 1 的评论只计入 mention_count（并计入 low_info_mention_count 或对应类别）
 
 【五、聚合与归一（店铺级）】
 1. 将明显同指实体进行归一（如“知音”“知音酒楼”）。
@@ -127,12 +123,6 @@ C. 分歧纳入
       "city_or_area": "从评论可推断的城市/区域；未知则null",
       "overall_signal": "推荐|避雷|分歧|中性",
       "confidence": 0.0,
-      "display": {
-        "title": "",
-        "subtitle": "",
-        "badge": "推荐",
-        "score": 0
-      },
       "stats": {
         "mention_count": 0,
         "recommend_count": 0,
@@ -181,22 +171,11 @@ C. 分歧纳入
 
 部分字段说明：
 
-1. display（展示辅助字段，服务于后续HTML/Markdown渲染，不是核心证据字段）
-- title: 店铺展示标题，通常等于 canonical_name
-- subtitle: 面向用户的一句话摘要（简短，不夸张，不与证据冲突）
-- badge: 店铺总体标签，只能取值：推荐 / 避雷 / 分歧 / 中性
-- score: 展示评分（0-100整数），用于排序和可视化；应综合有效推荐、有效避雷、信息量与置信度，不是绝对客观评分
-
-2. evidence_preview（展示摘要证据）
-- 从 evidence 中挑选2~3条最有代表性的证据片段
-- 用于前端卡片预览，必须与 evidence 含义一致
-- 不要新增 evidence 中不存在的信息
-
-3. recommended_reasons / warning_reasons（自然语言原因）
+1. recommended_reasons / warning_reasons（自然语言原因）
 - 这是面向解释的短语列表，可比 reason_tags 更具体
 - 推荐用短语而非长句，例如“锅包肉评价高”“量大适合聚餐”“有人反馈卫生问题”
 
-4. reason_tags（标准化原因标签）
+2. reason_tags（标准化原因标签）
 - 用于将 recommended_reasons / warning_reasons 中的自然语言原因归一为简短标签，便于筛选和展示
 - 每个标签应简短（2~8字），例如：口味好、分量足、性价比高、适合聚餐、排队久、卫生问题
 - 不要重复堆砌近义标签（如“量大”“分量大”“分量足”保留一个）
