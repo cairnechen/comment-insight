@@ -1,31 +1,46 @@
-// 可用模板列表（文件名不含 .md 扩展名，顺序即下拉顺序）
 const SCENES = [
-  "美食探店",
+  { name: "美食探店", icon: "🍜", desc: "识别推荐 / 避雷店铺" },
+  { name: "网文小说",  icon: "📚", desc: "挖掘小说推荐与评价" },
+  { name: "影视动漫",  icon: "🎬", desc: "提取剧集 / 番剧讨论" },
+  { name: "UP主推荐",  icon: "👤", desc: "发现优质 UP 主推荐" },
 ];
 
 // 支持 thinkingConfig 的模型列表
 const THINKING_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro"];
 
 // DOM 元素
-const $apiEndpoint = document.getElementById("apiEndpoint");
-const $apiKey = document.getElementById("apiKey");
-const $toggleApiKey = document.getElementById("toggleApiKey");
-const $modelName = document.getElementById("modelName");
-const $temperature = document.getElementById("temperature");
+const $apiEndpoint   = document.getElementById("apiEndpoint");
+const $apiKey        = document.getElementById("apiKey");
+const $toggleApiKey  = document.getElementById("toggleApiKey");
+const $modelName     = document.getElementById("modelName");
+const $temperature   = document.getElementById("temperature");
 const $temperatureValue = document.getElementById("temperatureValue");
 const $saveConfigBtn = document.getElementById("saveConfigBtn");
-const $testApiBtn = document.getElementById("testApiBtn");
-const $testResult = document.getElementById("testResult");
-const $promptTemplate = document.getElementById("promptTemplate");
+const $testApiBtn    = document.getElementById("testApiBtn");
+const $testResult    = document.getElementById("testResult");
+const $sceneGrid     = document.getElementById("sceneGrid");
 const $promptPreview = document.getElementById("promptPreview");
 const $savePromptBtn = document.getElementById("savePromptBtn");
+const $resetPromptBtn = document.getElementById("resetPromptBtn");
 const $disableThinking = document.getElementById("disableThinking");
-const $thinkingRow = document.getElementById("thinkingRow");
+const $thinkingRow   = document.getElementById("thinkingRow");
 
-// 加载并显示模板内容（只读预览）
-async function loadPromptPreview(name) {
+let currentScene = SCENES[0].name;
+
+// 优先从 storage 读取自定义 user_prompt，fallback 到文件
+async function loadUserPromptForScene(name) {
+  const key = `userPrompt_${name}`;
+  const stored = await new Promise(r =>
+    chrome.storage.local.get({ [key]: null }, res => r(res[key]))
+  );
+  if (stored !== null) {
+    $promptPreview.value = stored;
+    return;
+  }
   try {
-    const url = chrome.runtime.getURL(`scenes/${encodeURIComponent(name)}/system_prompt.md`);
+    const url = chrome.runtime.getURL(
+      `scenes/${encodeURIComponent(name)}/user_prompt.md`
+    );
     const res = await fetch(url);
     $promptPreview.value = res.ok ? await res.text() : "（模板文件未找到）";
   } catch {
@@ -33,15 +48,13 @@ async function loadPromptPreview(name) {
   }
 }
 
-// 动态填充模板下拉列表
-function buildPromptSelect() {
-  $promptTemplate.innerHTML = "";
-  for (const name of SCENES) {
-    const opt = document.createElement("option");
-    opt.value = name;
-    opt.textContent = name;
-    $promptTemplate.appendChild(opt);
-  }
+// 切换选中场景
+function selectScene(name) {
+  currentScene = name;
+  document.querySelectorAll(".scene-card").forEach(card => {
+    card.classList.toggle("selected", card.dataset.scene === name);
+  });
+  loadUserPromptForScene(name);
 }
 
 // 加载配置
@@ -52,7 +65,7 @@ function loadConfig() {
     modelName: "gemini-2.5-flash",
     temperature: 0.1,
     disableThinking: true,
-    promptTemplate: SCENES[0] ?? ""
+    promptTemplate: SCENES[0].name
   }, (res) => {
     $apiEndpoint.value = res.apiEndpoint;
     $apiKey.value = res.apiKey;
@@ -61,10 +74,10 @@ function loadConfig() {
     $temperatureValue.textContent = res.temperature;
     $disableThinking.checked = res.disableThinking;
     updateThinkingVisibility();
-    // 若已保存的模板仍在列表中则还原，否则回退到第一个
-    if (SCENES.includes(res.promptTemplate)) {
-      $promptTemplate.value = res.promptTemplate;
-    }
+    const sceneName = SCENES.some(s => s.name === res.promptTemplate)
+      ? res.promptTemplate
+      : SCENES[0].name;
+    selectScene(sceneName);
   });
 }
 
@@ -86,13 +99,13 @@ function saveConfig() {
   });
 }
 
-// 保存所选模板
+// 保存场景选择和自定义 user_prompt
 function savePrompt() {
-  chrome.storage.local.set({
-    promptTemplate: $promptTemplate.value
-  }, () => {
-    showResult("✓ 模板已保存", "success");
-  });
+  const key = `userPrompt_${currentScene}`;
+  chrome.storage.local.set(
+    { promptTemplate: currentScene, [key]: $promptPreview.value.trim() },
+    () => showResult("✓ 场景与提示词已保存", "success")
+  );
 }
 
 // 测试 Gemini API 连接
@@ -163,9 +176,26 @@ $modelName.addEventListener("change", updateThinkingVisibility);
 $saveConfigBtn.addEventListener("click", saveConfig);
 $testApiBtn.addEventListener("click", testConnection);
 $savePromptBtn.addEventListener("click", savePrompt);
-$promptTemplate.addEventListener("change", () => loadPromptPreview($promptTemplate.value));
+
+$sceneGrid.addEventListener("click", (e) => {
+  const card = e.target.closest(".scene-card");
+  if (card) selectScene(card.dataset.scene);
+});
+
+$resetPromptBtn.addEventListener("click", async () => {
+  const key = `userPrompt_${currentScene}`;
+  await new Promise(r => chrome.storage.local.remove(key, r));
+  try {
+    const url = chrome.runtime.getURL(
+      `scenes/${encodeURIComponent(currentScene)}/user_prompt.md`
+    );
+    const res = await fetch(url);
+    $promptPreview.value = res.ok ? await res.text() : "（模板文件未找到）";
+    showResult("↺ 已恢复默认提示词", "success");
+  } catch {
+    $promptPreview.value = "（加载失败）";
+  }
+});
 
 // 初始化
-buildPromptSelect();
 loadConfig();
-loadPromptPreview(SCENES[0]);

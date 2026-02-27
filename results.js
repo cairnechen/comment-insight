@@ -120,6 +120,13 @@ async function loadSystemPrompt(name) {
 }
 
 async function loadUserPrompt(name) {
+  // 优先使用用户自定义（storage）
+  const key = `userPrompt_${name}`;
+  const stored = await new Promise(r =>
+    chrome.storage.local.get({ [key]: null }, res => r(res[key]))
+  );
+  if (stored !== null) return stored;
+  // fallback 到文件
   const url = chrome.runtime.getURL(`scenes/${encodeURIComponent(name)}/user_prompt.md`);
   const res = await fetch(url);
   if (!res.ok) throw new Error(`user_prompt.md 不存在：scenes/${name}/`);

@@ -85,17 +85,41 @@
       <div class="section">
         <div class="section-title">提示词模板</div>
 
-        <div class="config-row">
-          <label>选择模板</label>
-          <select id="promptTemplate">
-            <!-- 由 options.js 动态填充 -->
-          </select>
-          <div class="hint">模板文件位于扩展目录 prompts/ 文件夹，新增 .md 文件并在 options.js 的 PROMPT_FILES 中注册即可</div>
+        <!-- 场景选择卡片 -->
+        <div class="scene-grid" id="sceneGrid">
+          <div class="scene-card" data-scene="美食探店">
+            <div class="scene-check">✓</div>
+            <div class="scene-icon">🍜</div>
+            <div class="scene-name">美食探店</div>
+            <div class="scene-desc">识别推荐 / 避雷店铺</div>
+          </div>
+          <div class="scene-card" data-scene="网文小说">
+            <div class="scene-check">✓</div>
+            <div class="scene-icon">📚</div>
+            <div class="scene-name">网文小说</div>
+            <div class="scene-desc">挖掘小说推荐与评价</div>
+          </div>
+          <div class="scene-card" data-scene="影视动漫">
+            <div class="scene-check">✓</div>
+            <div class="scene-icon">🎬</div>
+            <div class="scene-name">影视动漫</div>
+            <div class="scene-desc">提取剧集 / 番剧讨论</div>
+          </div>
+          <div class="scene-card" data-scene="UP主推荐">
+            <div class="scene-check">✓</div>
+            <div class="scene-icon">👤</div>
+            <div class="scene-name">UP主推荐</div>
+            <div class="scene-desc">发现优质 UP 主推荐</div>
+          </div>
         </div>
 
+        <!-- user_prompt 可编辑区 -->
         <div class="config-row">
-          <label>提示词内容预览</label>
-          <textarea id="promptPreview" readonly rows="14" placeholder="加载中…"></textarea>
+          <div class="prompt-header">
+            <label>提示词（可编辑）</label>
+            <button class="btn-reset" id="resetPromptBtn">↺ 恢复默认</button>
+          </div>
+          <textarea id="promptPreview" rows="10" placeholder="加载中…"></textarea>
         </div>
 
         <button class="btn primary save-prompt" id="savePromptBtn">💾 保存选择</button>
