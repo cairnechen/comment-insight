@@ -12,6 +12,9 @@ const $contentExport = document.getElementById("contentExport");
 const $contentLibrary = document.getElementById("contentLibrary");
 const $libraryList = document.getElementById("libraryList");
 
+// 当前视频页的 bvid（init 后赋值，供 switchTab 等函数使用）
+let currentBvid = null;
+
 function setStatus(text, kind = "muted") {
   $status.textContent = text;
   $status.classList.remove("ok", "err");
@@ -107,6 +110,21 @@ async function checkAnyCache() {
   return records.length > 0;
 }
 
+// 刷新导出 tab 的缓存状态（切回 export tab 时调用）
+async function refreshCacheStatus(bvid) {
+  const cacheData = await checkCache(bvid);
+  if (cacheData.hasCache) {
+    showCacheInfo(cacheData);
+    setStatus("检测到缓存数据。可以查看已有结果或重新导出。");
+  } else {
+    $cacheNotice.classList.remove("visible");
+    $viewResultsBtn.classList.remove("visible");
+    $btn.textContent = "一键导出";
+    setStatus("就绪。点击【一键导出】开始抓取。");
+  }
+  $clearCacheBtn.style.display = (await checkAnyCache()) ? "block" : "none";
+}
+
 // 显示缓存信息
 function showCacheInfo(cacheData) {
   const timeStr = new Date(cacheData.time).toLocaleString('zh-CN', {
@@ -170,7 +188,7 @@ async function renderLibrary() {
     activeItem.innerHTML = hasProgress
       ? `<div class="library-item-active-body">
            <div class="library-item-info">
-             <div class="library-item-bvid">${exportingBvid}</div>
+             <div class="library-item-bvid"><a href="https://www.bilibili.com/video/${exportingBvid}/" target="_blank">${exportingBvid}</a></div>
              <div class="library-item-progress-text">${progressFetched.toLocaleString()} / ${progressTotal.toLocaleString()} 条</div>
            </div>
            <div class="library-item-pct">${pct}%</div>
@@ -178,7 +196,7 @@ async function renderLibrary() {
          <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>`
       : `<div class="library-item-active-body">
            <div class="library-item-info">
-             <div class="library-item-bvid">${exportingBvid}</div>
+             <div class="library-item-bvid"><a href="https://www.bilibili.com/video/${exportingBvid}/" target="_blank">${exportingBvid}</a></div>
              <div class="library-item-progress-text">导出进行中
                <span class="dot-loader"><span></span><span></span><span></span></span>
              </div>
@@ -186,6 +204,10 @@ async function renderLibrary() {
            <div class="library-item-pct" style="color:var(--text-muted);font-size:13px;">…</div>
          </div>
          <div class="progress-track"><div class="progress-fill" style="width:0%"></div></div>`;
+    activeItem.querySelector(".library-item-bvid a").addEventListener("click", async (e) => {
+      e.preventDefault();
+      await chrome.tabs.create({ url: `https://www.bilibili.com/video/${exportingBvid}/`, active: true });
+    });
     $libraryList.appendChild(activeItem);
   }
 
@@ -209,7 +231,7 @@ async function renderLibrary() {
     item.className = "library-item";
     item.innerHTML = `
       <div class="library-item-info">
-        <div class="library-item-bvid">${rec.bvid}</div>
+        <div class="library-item-bvid"><a href="https://www.bilibili.com/video/${rec.bvid}/" target="_blank">${rec.bvid}</a></div>
         <div class="library-item-meta">${totalCount.toLocaleString()} 条评论 · ${timeStr}</div>
       </div>
       <div class="library-item-actions">
@@ -217,6 +239,11 @@ async function renderLibrary() {
         <button class="lib-btn lib-btn-del" data-bvid="${rec.bvid}">删除</button>
       </div>
     `;
+
+    item.querySelector(".library-item-bvid a").addEventListener("click", async (e) => {
+      e.preventDefault();
+      await chrome.tabs.create({ url: `https://www.bilibili.com/video/${rec.bvid}/`, active: true });
+    });
 
     item.querySelector(".lib-btn-view").addEventListener("click", async () => {
       const url = chrome.runtime.getURL("results.html") + "?bvid=" + encodeURIComponent(rec.bvid);
@@ -242,6 +269,7 @@ function switchTab(tab) {
     $tabLibrary.classList.remove("active");
     $contentExport.classList.add("active");
     $contentLibrary.classList.remove("active");
+    if (currentBvid) refreshCacheStatus(currentBvid);
   } else {
     $tabLibrary.classList.add("active");
     $tabExport.classList.remove("active");
@@ -278,6 +306,7 @@ async function init() {
     return;
   }
 
+  currentBvid = bvid;
   $bvid.textContent = bvid;
 
   // 检查是否正在导出（关联 bvid）

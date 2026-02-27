@@ -22,6 +22,7 @@ const $sceneGrid     = document.getElementById("sceneGrid");
 const $promptPreview = document.getElementById("promptPreview");
 const $savePromptBtn = document.getElementById("savePromptBtn");
 const $resetPromptBtn = document.getElementById("resetPromptBtn");
+const $promptResult  = document.getElementById("promptResult");
 const $disableThinking = document.getElementById("disableThinking");
 const $thinkingRow   = document.getElementById("thinkingRow");
 
@@ -104,7 +105,7 @@ function savePrompt() {
   const key = `userPrompt_${currentScene}`;
   chrome.storage.local.set(
     { promptTemplate: currentScene, [key]: $promptPreview.value.trim() },
-    () => showResult("✓ 场景与提示词已保存", "success")
+    () => showPromptResult("✓ 场景与提示词已保存", "success")
   );
 }
 
@@ -156,11 +157,18 @@ async function testConnection() {
   }
 }
 
-// 显示结果提示
+// 显示 API 配置区通知
 function showResult(message, type) {
   $testResult.textContent = message;
   $testResult.className = `result ${type}`;
   $testResult.style.display = "block";
+}
+
+// 显示提示词模板区通知
+function showPromptResult(message, type) {
+  $promptResult.textContent = message;
+  $promptResult.className = `result ${type}`;
+  $promptResult.style.display = "block";
 }
 
 // 事件监听
@@ -191,7 +199,7 @@ $resetPromptBtn.addEventListener("click", async () => {
     );
     const res = await fetch(url);
     $promptPreview.value = res.ok ? await res.text() : "（模板文件未找到）";
-    showResult("↺ 已恢复默认提示词", "success");
+    showPromptResult("↺ 已恢复默认提示词", "success");
   } catch {
     $promptPreview.value = "（加载失败）";
   }
