@@ -18,6 +18,10 @@ const $aiConfigHint = document.getElementById("aiConfigHint");
 // Global data
 let exportData = null;
 
+// 两阶段分析开关：true = 使用发现+深度分析流水线；false = 原有单次调用
+// 修改此值即可切换模式，无需改动其他代码
+const USE_TWO_STAGE_ANALYSIS = true;
+
 // Utility functions
 function formatBytes(bytes) {
   if (bytes === 0) return "0 Bytes";
@@ -256,6 +260,129 @@ async function callGeminiAPI({ apiEndpoint, apiKey, modelName, temperature, disa
   }
 }
 
+// ── 两阶段分析辅助函数 ──────────────────────────────────────────────────────
+
+// 加载 Stage 1 prompt；文件不存在时返回 null（触发报错而非 fallback）
+async function loadStage1Prompt(name) {
+  try {
+    const url = chrome.runtime.getURL(
+      `scenes/${encodeURIComponent(name)}/user_prompt_stage1.md`
+    );
+    const res = await fetch(url);
+    return res.ok ? await res.text() : null;
+  } catch {
+    return null;
+  }
+}
+
+// 将评论树展平为 rpid → comment 的 Map
+function buildRpidMap(comments) {
+  const map = new Map();
+  function walk(list) {
+    for (const c of list) {
+      map.set(String(c.rpid), c);
+      if (c.replies?.length) walk(c.replies);
+    }
+  }
+  walk(comments);
+  return map;
+}
+
+// 数组分批
+function chunkArray(arr, size) {
+  const result = [];
+  for (let i = 0; i < arr.length; i += size) {
+    result.push(arr.slice(i, i + size));
+  }
+  return result;
+}
+
+const STAGE2_BATCH_SIZE = 8; // 每批处理的店铺数
+
+async function runTwoStageAnalysis({
+  apiConfig, systemPrompt, userPromptStage1, userPromptStage2,
+  filteredComments, bvid
+}) {
+  // ── Stage 1：发现 + 归一 ──────────────────────────────────
+  showStatus("⏳", "第一阶段：正在发现并归一店铺名称…");
+  const resp1 = await callGeminiAPI({
+    ...apiConfig, systemPrompt,
+    userPrompt: userPromptStage1,
+    commentsData: { bvid, comments: filteredComments }
+  });
+
+  if (resp1.truncated) {
+    throw new Error("第一阶段输出被截断，无法获得完整店铺列表。请优化 user_prompt_stage1.md 或减少评论量。");
+  }
+
+  const stripped1 = resp1.text.trim()
+    .replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  let discovery;
+  try {
+    discovery = JSON.parse(stripped1);
+  } catch (e) {
+    throw new Error(`第一阶段 JSON 解析失败：${e.message}`);
+  }
+
+  // ── 客户端 rpid 查找 ──────────────────────────────────────
+  const rpidMap = buildRpidMap(filteredComments);
+
+  const allShops = [
+    ...(discovery.shops || []).map(s => ({ ...s, _cat: "shops" })),
+    ...(discovery.omitted_shops || []).map(s => ({ ...s, _cat: "omitted_shops" })),
+    ...(discovery.low_confidence_mentions || []).map(s => ({ ...s, _cat: "low_confidence_mentions" })),
+  ];
+
+  const totalShops = allShops.length;
+  const totalBatches = Math.ceil(totalShops / STAGE2_BATCH_SIZE);
+  showStatus("⏳", `第一阶段完成：发现 ${totalShops} 家店铺，开始第二阶段（共 ${totalBatches} 批）…`);
+
+  // ── Stage 2：分批深度分析 ─────────────────────────────────
+  const finalResult = { shops: [], omitted_shops: [], low_confidence_mentions: [] };
+  const batches = chunkArray(allShops, STAGE2_BATCH_SIZE);
+
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
+    showStatus("⏳", `第二阶段：正在分析第 ${i + 1} / ${totalBatches} 批店铺…`);
+
+    // 构建本批证据：shop_name + 对应评论原文
+    const batchEvidence = batch.map(shop => ({
+      shop_name: shop.name,
+      comments: (shop.rpids || [])
+        .map(rpid => rpidMap.get(String(rpid)))
+        .filter(Boolean)
+    }));
+
+    const resp2 = await callGeminiAPI({
+      ...apiConfig, systemPrompt,
+      userPrompt: `${userPromptStage2}\n\n注意：以下数据已按店铺分组，每个条目包含 shop_name 和该店铺的相关评论列表。请对每家店铺输出完整分析，输出为 JSON 数组，元素顺序与输入一致。`,
+      commentsData: batchEvidence
+    });
+
+    const stripped2 = resp2.text.trim()
+      .replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    let batchResult;
+    try {
+      batchResult = JSON.parse(stripped2);
+      if (!Array.isArray(batchResult)) batchResult = [batchResult];
+    } catch (e) {
+      // 本批解析失败：记录原始文本，继续处理其他批次
+      console.warn(`第 ${i + 1} 批 JSON 解析失败：`, e.message);
+      batch.forEach(shop => {
+        finalResult[shop._cat].push({ name: shop.name, _parse_error: e.message, _raw: resp2.text });
+      });
+      continue;
+    }
+
+    // 将结果按原始分类归位
+    batch.forEach((shop, idx) => {
+      finalResult[shop._cat].push(batchResult[idx] ?? { name: shop.name, _missing: true });
+    });
+  }
+
+  return finalResult;
+}
+
 async function downloadMarkdown({ text, filename }) {
   const enc = new TextEncoder();
   const bytes = enc.encode(text);
@@ -428,10 +555,10 @@ $aiSummaryBtn.addEventListener("click", async () => {
     }
 
     $aiSummaryBtn.disabled = true;
-    showStatus("⏳", "正在调用 Gemini API 进行分析...\n这可能需要一些时间，请耐心等待");
+    showStatus("⏳", "正在准备分析…");
 
-    // 并行加载 system_prompt 和 user_prompt
-    const [systemPrompt, userPrompt] = await Promise.all([
+    // 并行加载 system_prompt 和 user_prompt（stage2 prompt，两种模式都需要）
+    const [systemPrompt, userPromptStage2] = await Promise.all([
       loadSystemPrompt(config.promptTemplate),
       loadUserPrompt(config.promptTemplate),
     ]);
@@ -445,31 +572,60 @@ $aiSummaryBtn.addEventListener("click", async () => {
     if (keywords) {
       const total = exportData.comments.length;
       const kept = filteredComments.length;
-      showStatus("⏳", `关键词筛选：保留 ${kept} / ${total} 个话题，正在调用 Gemini API…`);
+      showStatus("⏳", `关键词筛选：保留 ${kept} / ${total} 个话题…`);
     }
 
-    // 调用API
-    const aiResponse = await callGeminiAPI({
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const filename = `ai_summary_${exportData.bvid}_${timestamp}.json`;
+
+    const apiConfig = {
       apiEndpoint: config.apiEndpoint,
       apiKey: config.apiKey,
       modelName: config.modelName || "gemini-2.5-flash",
-      temperature: config.temperature || 0.1,
+      temperature: config.temperature ?? 0.1,
       disableThinking: config.disableThinking ?? true,
-      systemPrompt,
-      userPrompt,
-      commentsData: { bvid: exportData.bvid, comments: filteredComments }
-    });
+    };
 
-    // 下载结果
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    const filename = `ai_summary_${exportData.bvid}_${timestamp}.json`;
-    await downloadJSON({ text: aiResponse.text, filename, truncated: aiResponse.truncated });
+    if (USE_TWO_STAGE_ANALYSIS) {
+      // ── 两阶段流水线 ─────────────────────────────────────────
+      const userPromptStage1 = await loadStage1Prompt(config.promptTemplate);
+      if (!userPromptStage1) {
+        throw new Error(
+          `已启用两阶段分析，但当前场景缺少 user_prompt_stage1.md（scenes/${config.promptTemplate}/user_prompt_stage1.md）`
+        );
+      }
 
-    if (aiResponse.truncated) {
-      showStatus("⚠️", `AI 总结完成，但输出已达 token 上限，结果可能不完整。\n文件：${filename}`, "warning");
+      const result = await runTwoStageAnalysis({
+        apiConfig, systemPrompt,
+        userPromptStage1, userPromptStage2,
+        filteredComments, bvid: exportData.bvid
+      });
+      const enc = new TextEncoder();
+      downloadFile({
+        bytes: enc.encode(JSON.stringify(result, null, 2)),
+        filename,
+        mime: "application/json;charset=utf-8"
+      });
+      showStatus("✅", `两阶段 AI 分析完成！\n文件：${filename}`, "success");
+
     } else {
-      showStatus("✅", `AI 总结完成！\n文件：${filename}`, "success");
+      // ── 原有单次调用路径（USE_TWO_STAGE_ANALYSIS = false）────
+      showStatus("⏳", "正在调用 Gemini API 进行分析…");
+      const aiResponse = await callGeminiAPI({
+        ...apiConfig, systemPrompt,
+        userPrompt: userPromptStage2,
+        commentsData: { bvid: exportData.bvid, comments: filteredComments }
+      });
+      await downloadJSON({ text: aiResponse.text, filename, truncated: aiResponse.truncated });
+      showStatus(
+        aiResponse.truncated ? "⚠️" : "✅",
+        aiResponse.truncated
+          ? `AI 总结完成，但输出已达 token 上限，结果可能不完整。\n文件：${filename}`
+          : `AI 总结完成！\n文件：${filename}`,
+        aiResponse.truncated ? "warning" : "success"
+      );
     }
+
     setTimeout(hideStatus, 5000);
   } catch (error) {
     showStatus("❌", `AI 总结失败：${error.message}`, "error");
