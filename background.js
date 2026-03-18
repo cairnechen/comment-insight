@@ -5,9 +5,13 @@
 // IndexedDB 辅助函数
 function openDB() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open("comment-insight", 1);
+    const req = indexedDB.open("comment-insight", 2);
     req.onupgradeneeded = (e) => {
-      e.target.result.createObjectStore("exports", { keyPath: "bvid" });
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains("exports"))
+        db.createObjectStore("exports", { keyPath: "bvid" });
+      if (!db.objectStoreNames.contains("summaries"))
+        db.createObjectStore("summaries", { keyPath: "bvid" });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);

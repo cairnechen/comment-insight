@@ -9,6 +9,9 @@ Thumbs.db
 .vscode/
 .idea/
 
+# 测试目录（包含 API key 和测试数据）
+test/
+
 # 临时文件
 *.log
 *.tmp

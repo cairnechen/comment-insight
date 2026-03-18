@@ -123,6 +123,20 @@ async function loadSystemPrompt(name) {
   return res.text();
 }
 
+async function loadSystemPromptStage1(name) {
+  const url = chrome.runtime.getURL(`scenes/${encodeURIComponent(name)}/system_prompt_stage1.md`);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`system_prompt_stage1.md 不存在：scenes/${name}/`);
+  return res.text();
+}
+
+async function loadSystemPromptStage2(name) {
+  const url = chrome.runtime.getURL(`scenes/${encodeURIComponent(name)}/system_prompt_stage2.md`);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`system_prompt_stage2.md 不存在：scenes/${name}/`);
+  return res.text();
+}
+
 async function loadUserPrompt(name) {
   // 优先使用用户自定义（storage）
   const key = `userPrompt_${name}`;
@@ -168,7 +182,7 @@ function filterThreadsByKeywords(comments, keywords) {
   return comments.filter(thread => hasKeywordMatch(thread, keywords));
 }
 
-const THINKING_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro"];
+const THINKING_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash-preview", "gemini-3.1-pro-preview"];
 
 async function callGeminiAPI({ apiEndpoint, apiKey, modelName, temperature, disableThinking, systemPrompt, userPrompt, commentsData }) {
   let apiUrl = apiEndpoint.trim();
@@ -275,6 +289,24 @@ async function loadStage1Prompt(name) {
   }
 }
 
+// Stage 1 输出去重：合并同名店铺的 aliases
+function deduplicateShops(shops) {
+  const seen = new Map();
+  const result = [];
+  for (const shop of shops) {
+    if (seen.has(shop.name)) {
+      const existing = result[seen.get(shop.name)];
+      for (const a of (shop.aliases || [])) {
+        if (!existing.aliases.includes(a)) existing.aliases.push(a);
+      }
+    } else {
+      seen.set(shop.name, result.length);
+      result.push({ ...shop, aliases: [...(shop.aliases || [])] });
+    }
+  }
+  return result;
+}
+
 // 将评论树展平为 rpid → comment 的 Map
 function buildRpidMap(comments) {
   const map = new Map();
@@ -288,31 +320,51 @@ function buildRpidMap(comments) {
   return map;
 }
 
-// 数组分批
-function chunkArray(arr, size) {
-  const result = [];
-  for (let i = 0; i < arr.length; i += size) {
-    result.push(arr.slice(i, i + size));
+// 按字节数和店铺数双重限制贪心分批
+function chunkByBytes(items, limitBytes, limitCount = Infinity) {
+  const batches = [];
+  let current = [], currentSize = 0;
+  for (const item of items) {
+    const size = JSON.stringify(item).length;
+    if (current.length > 0 && (currentSize + size > limitBytes || current.length >= limitCount)) {
+      batches.push(current);
+      current = [];
+      currentSize = 0;
+    }
+    current.push(item);
+    currentSize += size;
   }
-  return result;
+  if (current.length > 0) batches.push(current);
+  return batches;
 }
 
-const STAGE2_BATCH_SIZE = 8; // 每批处理的店铺数
+const STAGE2_BATCH_SIZE_BYTES = 25 * 1024; // 每批最大字节数（25 KB）
+const STAGE2_BATCH_SIZE_COUNT = 20;        // 每批最大店铺数
+
+function stripForStage1(list) {
+  return list.map(c => ({
+    rpid: c.rpid,
+    uname: c.uname,
+    message: c.message,
+    replies: c.replies?.length ? stripForStage1(c.replies) : null
+  }));
+}
 
 async function runTwoStageAnalysis({
-  apiConfig, systemPrompt, userPromptStage1, userPromptStage2,
+  apiConfig, systemPrompt, systemPromptStage1, userPromptStage1, userPromptStage2,
   filteredComments, bvid
 }) {
   // ── Stage 1：发现 + 归一 ──────────────────────────────────
   showStatus("⏳", "第一阶段：正在发现并归一店铺名称…");
   const resp1 = await callGeminiAPI({
-    ...apiConfig, systemPrompt,
+    ...apiConfig,
+    systemPrompt: systemPromptStage1,
     userPrompt: userPromptStage1,
-    commentsData: { bvid, comments: filteredComments }
+    commentsData: { bvid, comments: stripForStage1(filteredComments) }
   });
 
   if (resp1.truncated) {
-    throw new Error("第一阶段输出被截断，无法获得完整店铺列表。请优化 user_prompt_stage1.md 或减少评论量。");
+    throw new Error("第一阶段输出被截断，无法获得完整店铺列表。请优化 system_prompt_stage1.md 或减少评论量。");
   }
 
   const stripped1 = resp1.text.trim()
@@ -324,38 +376,84 @@ async function runTwoStageAnalysis({
     throw new Error(`第一阶段 JSON 解析失败：${e.message}`);
   }
 
-  // ── 客户端 rpid 查找 ──────────────────────────────────────
+  // ── 客户端重组：字符串匹配 → dialog 优先，消费对应 rpid ──
   const rpidMap = buildRpidMap(filteredComments);
+  const allShops = deduplicateShops(discovery.shops || []);
 
-  const allShops = [
-    ...(discovery.shops || []).map(s => ({ ...s, _cat: "shops" })),
-    ...(discovery.omitted_shops || []).map(s => ({ ...s, _cat: "omitted_shops" })),
-    ...(discovery.low_confidence_mentions || []).map(s => ({ ...s, _cat: "low_confidence_mentions" })),
-  ];
+  function buildShopEvidence(shop) {
+    const names = [shop.name, ...(shop.aliases || [])].filter(Boolean);
 
-  const totalShops = allShops.length;
-  const totalBatches = Math.ceil(totalShops / STAGE2_BATCH_SIZE);
+    // Step 1：遍历 filteredComments，按文字匹配收集 rpid / dialog_id
+    const matchedRpids = new Set();
+    const matchedDialogIds = new Set();
+    function scanNode(node) {
+      if (names.some(n => (node.message || "").includes(n))) {
+        if (node.root === 0) {
+          matchedRpids.add(String(node.rpid));
+        } else {
+          matchedDialogIds.add(String(node.dialog || node.rpid));
+        }
+      }
+      if (node.replies?.length) node.replies.forEach(scanNode);
+    }
+    filteredComments.forEach(scanNode);
+
+    // Step 2：dialog_ids → 按 rootRpid 分组 dialogNode
+    const parts = [];
+    const rootToDialogs = new Map();
+    for (const dialogId of matchedDialogIds) {
+      const dialogNode = rpidMap.get(dialogId);
+      if (!dialogNode) continue;
+      const rootRpid = String(dialogNode.root);
+      if (!rootToDialogs.has(rootRpid)) rootToDialogs.set(rootRpid, []);
+      rootToDialogs.get(rootRpid).push(dialogNode);
+    }
+
+    // Step 3：构建嵌套结构：主评论 + 仅相关 dialog 子线程
+    const consumedRpids = new Set();
+    for (const [rootRpid, dialogNodes] of rootToDialogs) {
+      const root = rpidMap.get(rootRpid);
+      if (root) {
+        parts.push({ ...root, replies: dialogNodes });
+        consumedRpids.add(rootRpid);
+      }
+    }
+
+    // Step 4：剩余 rpid（主评论直接提及，无相关 dialog 线程）
+    for (const rpid of matchedRpids) {
+      if (!consumedRpids.has(rpid)) {
+        const c = rpidMap.get(rpid);
+        if (c) parts.push({ ...c, replies: null });
+      }
+    }
+
+    return parts;
+  }
+
+  // 重组评论，过滤掉客户端匹配不到任何评论的店铺（0节点幻觉）
+  const shopEvidences = allShops
+    .map(shop => ({
+      shop_name: shop.name,
+      aliases: shop.aliases || [],
+      comments: buildShopEvidence(shop)
+    }))
+    .filter(s => s.comments.length > 0);
+
+  const totalShops = shopEvidences.length;
+  const bytesBatches = chunkByBytes(shopEvidences, STAGE2_BATCH_SIZE_BYTES, STAGE2_BATCH_SIZE_COUNT);
+  const totalBatches = bytesBatches.length;
   showStatus("⏳", `第一阶段完成：发现 ${totalShops} 家店铺，开始第二阶段（共 ${totalBatches} 批）…`);
 
   // ── Stage 2：分批深度分析 ─────────────────────────────────
   const finalResult = { shops: [], omitted_shops: [], low_confidence_mentions: [] };
-  const batches = chunkArray(allShops, STAGE2_BATCH_SIZE);
 
-  for (let i = 0; i < batches.length; i++) {
-    const batch = batches[i];
+  for (let i = 0; i < bytesBatches.length; i++) {
+    const batchEvidence = bytesBatches[i];
     showStatus("⏳", `第二阶段：正在分析第 ${i + 1} / ${totalBatches} 批店铺…`);
-
-    // 构建本批证据：shop_name + 对应评论原文
-    const batchEvidence = batch.map(shop => ({
-      shop_name: shop.name,
-      comments: (shop.rpids || [])
-        .map(rpid => rpidMap.get(String(rpid)))
-        .filter(Boolean)
-    }));
 
     const resp2 = await callGeminiAPI({
       ...apiConfig, systemPrompt,
-      userPrompt: `${userPromptStage2}\n\n注意：以下数据已按店铺分组，每个条目包含 shop_name 和该店铺的相关评论列表。请对每家店铺输出完整分析，输出为 JSON 数组，元素顺序与输入一致。`,
+      userPrompt: userPromptStage2,
       commentsData: batchEvidence
     });
 
@@ -364,20 +462,19 @@ async function runTwoStageAnalysis({
     let batchResult;
     try {
       batchResult = JSON.parse(stripped2);
-      if (!Array.isArray(batchResult)) batchResult = [batchResult];
     } catch (e) {
       // 本批解析失败：记录原始文本，继续处理其他批次
       console.warn(`第 ${i + 1} 批 JSON 解析失败：`, e.message);
-      batch.forEach(shop => {
-        finalResult[shop._cat].push({ name: shop.name, _parse_error: e.message, _raw: resp2.text });
+      batchEvidence.forEach(shop => {
+        finalResult.omitted_shops.push({ shop_name: shop.shop_name, reason: `JSON 解析失败：${e.message}` });
       });
       continue;
     }
 
-    // 将结果按原始分类归位
-    batch.forEach((shop, idx) => {
-      finalResult[shop._cat].push(batchResult[idx] ?? { name: shop.name, _missing: true });
-    });
+    // 直接合并各批次的三个数组
+    finalResult.shops.push(...(batchResult.shops || []));
+    finalResult.omitted_shops.push(...(batchResult.omitted_shops || []));
+    finalResult.low_confidence_mentions.push(...(batchResult.low_confidence_mentions || []));
   }
 
   return finalResult;
@@ -429,9 +526,13 @@ async function checkGeminiConfig() {
 // IndexedDB 辅助函数
 function openDB() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open("comment-insight", 1);
+    const req = indexedDB.open("comment-insight", 2);
     req.onupgradeneeded = (e) => {
-      e.target.result.createObjectStore("exports", { keyPath: "bvid" });
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains("exports"))
+        db.createObjectStore("exports", { keyPath: "bvid" });
+      if (!db.objectStoreNames.contains("summaries"))
+        db.createObjectStore("summaries", { keyPath: "bvid" });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -445,6 +546,16 @@ async function idbGet(bvid) {
     const req = tx.objectStore("exports").get(bvid);
     req.onsuccess = () => resolve(req.result || null);
     req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbSaveSummary({ bvid, scene, data }) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("summaries", "readwrite");
+    tx.objectStore("summaries").put({ bvid, timestamp: new Date().toISOString(), scene, data });
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
   });
 }
 
@@ -557,10 +668,26 @@ $aiSummaryBtn.addEventListener("click", async () => {
     $aiSummaryBtn.disabled = true;
     showStatus("⏳", "正在准备分析…");
 
-    // 并行加载 system_prompt 和 user_prompt（stage2 prompt，两种模式都需要）
+    // 两阶段模式：system_prompt_stage2.md + user_prompt_stage2.md
+    // 单阶段模式：system_prompt.md + user_prompt.md
     const [systemPrompt, userPromptStage2] = await Promise.all([
-      loadSystemPrompt(config.promptTemplate),
-      loadUserPrompt(config.promptTemplate),
+      USE_TWO_STAGE_ANALYSIS
+        ? loadSystemPromptStage2(config.promptTemplate)
+        : loadSystemPrompt(config.promptTemplate),
+      USE_TWO_STAGE_ANALYSIS
+        ? (async () => {
+            // 优先使用用户自定义（storage），fallback 到文件
+            const key = `userPromptStage2_${config.promptTemplate}`;
+            const stored = await new Promise(r =>
+              chrome.storage.local.get({ [key]: null }, res => r(res[key]))
+            );
+            if (stored !== null) return stored;
+            const url = chrome.runtime.getURL(`scenes/${encodeURIComponent(config.promptTemplate)}/user_prompt_stage2.md`);
+            const res = await fetch(url);
+            if (!res.ok) throw new Error(`user_prompt_stage2.md 不存在：scenes/${config.promptTemplate}/`);
+            return res.text();
+          })()
+        : loadUserPrompt(config.promptTemplate),
     ]);
 
     // 加载关键词并过滤（keywords 为 null 时跳过，发全量数据）
@@ -575,9 +702,6 @@ $aiSummaryBtn.addEventListener("click", async () => {
       showStatus("⏳", `关键词筛选：保留 ${kept} / ${total} 个话题…`);
     }
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    const filename = `ai_summary_${exportData.bvid}_${timestamp}.json`;
-
     const apiConfig = {
       apiEndpoint: config.apiEndpoint,
       apiKey: config.apiKey,
@@ -588,7 +712,10 @@ $aiSummaryBtn.addEventListener("click", async () => {
 
     if (USE_TWO_STAGE_ANALYSIS) {
       // ── 两阶段流水线 ─────────────────────────────────────────
-      const userPromptStage1 = await loadStage1Prompt(config.promptTemplate);
+      const [systemPromptStage1, userPromptStage1] = await Promise.all([
+        loadSystemPromptStage1(config.promptTemplate),
+        loadStage1Prompt(config.promptTemplate),
+      ]);
       if (!userPromptStage1) {
         throw new Error(
           `已启用两阶段分析，但当前场景缺少 user_prompt_stage1.md（scenes/${config.promptTemplate}/user_prompt_stage1.md）`
@@ -596,17 +723,16 @@ $aiSummaryBtn.addEventListener("click", async () => {
       }
 
       const result = await runTwoStageAnalysis({
-        apiConfig, systemPrompt,
+        apiConfig, systemPrompt, systemPromptStage1,
         userPromptStage1, userPromptStage2,
         filteredComments, bvid: exportData.bvid
       });
-      const enc = new TextEncoder();
-      downloadFile({
-        bytes: enc.encode(JSON.stringify(result, null, 2)),
-        filename,
-        mime: "application/json;charset=utf-8"
+      await idbSaveSummary({ bvid: exportData.bvid, scene: config.promptTemplate, data: result });
+      await chrome.tabs.create({
+        url: chrome.runtime.getURL("summary.html") + "?bvid=" + encodeURIComponent(exportData.bvid),
+        active: true
       });
-      showStatus("✅", `两阶段 AI 分析完成！\n文件：${filename}`, "success");
+      showStatus("✅", "AI 分析完成，已在新标签页打开摘要", "success");
 
     } else {
       // ── 原有单次调用路径（USE_TWO_STAGE_ANALYSIS = false）────
@@ -616,12 +742,17 @@ $aiSummaryBtn.addEventListener("click", async () => {
         userPrompt: userPromptStage2,
         commentsData: { bvid: exportData.bvid, comments: filteredComments }
       });
-      await downloadJSON({ text: aiResponse.text, filename, truncated: aiResponse.truncated });
+      const stripped = aiResponse.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+      const data = JSON.parse(stripped);
+      if (aiResponse.truncated) data._truncated = true;
+      await idbSaveSummary({ bvid: exportData.bvid, scene: config.promptTemplate, data });
+      await chrome.tabs.create({
+        url: chrome.runtime.getURL("summary.html") + "?bvid=" + encodeURIComponent(exportData.bvid),
+        active: true
+      });
       showStatus(
         aiResponse.truncated ? "⚠️" : "✅",
-        aiResponse.truncated
-          ? `AI 总结完成，但输出已达 token 上限，结果可能不完整。\n文件：${filename}`
-          : `AI 总结完成！\n文件：${filename}`,
+        aiResponse.truncated ? "AI 总结完成，但输出可能不完整，已在新标签页打开摘要" : "AI 总结完成，已在新标签页打开摘要",
         aiResponse.truncated ? "warning" : "success"
       );
     }

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>美食探店 · AI 分析摘要</title>
+  <link rel="stylesheet" href="summary.css">
+</head>
+<body>
+
+  <!-- ── Sticky Header ─────────────────────────────────── -->
+  <header id="pageHeader">
+    <div class="header-left">
+      <span class="header-scene">🍜 美食探店</span>
+      <span class="header-divider">·</span>
+      <span id="headerBvid" class="header-bvid">--</span>
+      <span id="headerTime" class="header-time">--</span>
+    </div>
+    <div class="header-right">
+      <button id="downloadJsonBtn" class="btn-download">⬇ 下载 JSON</button>
+    </div>
+  </header>
+
+  <!-- ── Main Content ───────────────────────────────────── -->
+  <main class="content">
+
+    <!-- Loading / Error overlay -->
+    <div id="loadingOverlay" class="overlay">
+      <div class="overlay-spinner"></div>
+      <p id="overlayMsg">正在加载分析结果…</p>
+    </div>
+
+    <!-- Truncation warning (shown if data._truncated) -->
+    <div id="truncationBanner" class="truncation-banner" style="display:none">
+      ⚠️ AI 输出已达 token 上限，部分结果可能不完整
+    </div>
+
+    <!-- Summary stats strip -->
+    <section id="summaryStats" class="stats-card" style="display:none">
+      <div class="stats-chips" id="statsChips"></div>
+      <div class="sentiment-bar-wrap">
+        <div class="sentiment-bar" id="sentimentBar"></div>
+      </div>
+    </section>
+
+    <!-- Shop cards -->
+    <div id="shopList"></div>
+
+    <!-- Omitted shops -->
+    <details id="omittedSection" class="collapsed-section" style="display:none">
+      <summary class="collapsed-summary">
+        <span>被略过的店铺</span>
+        <span id="omittedCount" class="count-badge">0</span>
+      </summary>
+      <div id="omittedList" class="collapsed-list"></div>
+    </details>
+
+    <!-- Low confidence mentions -->
+    <details id="lowConfSection" class="collapsed-section" style="display:none">
+      <summary class="collapsed-summary">
+        <span>低可信度提及</span>
+        <span id="lowConfCount" class="count-badge">0</span>
+      </summary>
+      <div id="lowConfList" class="collapsed-list"></div>
+    </details>
+
+  </main>
+
+  <script src="summary.js"></script>
+</body>
+</html>

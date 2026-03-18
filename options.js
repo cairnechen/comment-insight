@@ -1,3 +1,6 @@
+// 与 results.js 保持一致；切换时两处同步修改
+const USE_TWO_STAGE_ANALYSIS = true;
+
 const SCENES = [
   { name: "美食探店", icon: "🍜", desc: "识别推荐 / 避雷店铺" },
   { name: "网文小说",  icon: "📚", desc: "挖掘小说推荐与评价" },
@@ -6,7 +9,7 @@ const SCENES = [
 ];
 
 // 支持 thinkingConfig 的模型列表
-const THINKING_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro"];
+const THINKING_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash-preview", "gemini-3.1-pro-preview"];
 
 // DOM 元素
 const $apiEndpoint   = document.getElementById("apiEndpoint");
@@ -28,9 +31,19 @@ const $thinkingRow   = document.getElementById("thinkingRow");
 
 let currentScene = SCENES[0].name;
 
+// 根据两阶段开关决定 storage key 和文件名
+function userPromptKey(name) {
+  return USE_TWO_STAGE_ANALYSIS ? `userPromptStage2_${name}` : `userPrompt_${name}`;
+}
+function userPromptFile(name) {
+  return USE_TWO_STAGE_ANALYSIS
+    ? `scenes/${encodeURIComponent(name)}/user_prompt_stage2.md`
+    : `scenes/${encodeURIComponent(name)}/user_prompt.md`;
+}
+
 // 优先从 storage 读取自定义 user_prompt，fallback 到文件
 async function loadUserPromptForScene(name) {
-  const key = `userPrompt_${name}`;
+  const key = userPromptKey(name);
   const stored = await new Promise(r =>
     chrome.storage.local.get({ [key]: null }, res => r(res[key]))
   );
@@ -39,9 +52,7 @@ async function loadUserPromptForScene(name) {
     return;
   }
   try {
-    const url = chrome.runtime.getURL(
-      `scenes/${encodeURIComponent(name)}/user_prompt.md`
-    );
+    const url = chrome.runtime.getURL(userPromptFile(name));
     const res = await fetch(url);
     $promptPreview.value = res.ok ? await res.text() : "（模板文件未找到）";
   } catch {
@@ -82,9 +93,11 @@ function loadConfig() {
   });
 }
 
-// 根据所选模型显示/隐藏思考模式开关
-function updateThinkingVisibility() {
-  $thinkingRow.style.display = THINKING_MODELS.includes($modelName.value) ? "" : "none";
+// 根据所选模型显示/隐藏思考模式开关；切换到支持思考的模型时默认关闭思考
+function updateThinkingVisibility(setDefault = false) {
+  const isThinking = THINKING_MODELS.includes($modelName.value);
+  $thinkingRow.style.display = isThinking ? "" : "none";
+  if (isThinking && setDefault) $disableThinking.checked = true;
 }
 
 // 保存 API 配置
@@ -102,7 +115,7 @@ function saveConfig() {
 
 // 保存场景选择和自定义 user_prompt
 function savePrompt() {
-  const key = `userPrompt_${currentScene}`;
+  const key = userPromptKey(currentScene);
   chrome.storage.local.set(
     { promptTemplate: currentScene, [key]: $promptPreview.value.trim() },
     () => showPromptResult("✓ 场景与提示词已保存", "success")
@@ -180,7 +193,7 @@ $temperature.addEventListener("input", () => {
   $temperatureValue.textContent = $temperature.value;
 });
 
-$modelName.addEventListener("change", updateThinkingVisibility);
+$modelName.addEventListener("change", () => updateThinkingVisibility(true));
 $saveConfigBtn.addEventListener("click", saveConfig);
 $testApiBtn.addEventListener("click", testConnection);
 $savePromptBtn.addEventListener("click", savePrompt);
@@ -191,12 +204,10 @@ $sceneGrid.addEventListener("click", (e) => {
 });
 
 $resetPromptBtn.addEventListener("click", async () => {
-  const key = `userPrompt_${currentScene}`;
+  const key = userPromptKey(currentScene);
   await new Promise(r => chrome.storage.local.remove(key, r));
   try {
-    const url = chrome.runtime.getURL(
-      `scenes/${encodeURIComponent(currentScene)}/user_prompt.md`
-    );
+    const url = chrome.runtime.getURL(userPromptFile(currentScene));
     const res = await fetch(url);
     $promptPreview.value = res.ok ? await res.text() : "（模板文件未找到）";
     showPromptResult("↺ 已恢复默认提示词", "success");
